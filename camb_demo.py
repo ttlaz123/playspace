@@ -19,6 +19,7 @@ sys.path.insert(0,camb_path)
 import camb
 from camb import model, initialpower
 
+from fgivenx import plot_contours, samples_from_getdist_chains, plot_lines, plot_dkl
 
 
 
@@ -192,13 +193,12 @@ def construct_logspline(logk_list, logP_list, ks):
 
     TODO: single run takes 0.068 sec, should try to speed up to 0.02 sec
     '''
-
     assert len(logk_list) == len(logP_list), "Number of Ks not equal to number of Ps"
     logks = np.log10(ks)
-    assert logks[0] >= logk_list[0] and logks[-1] <= logk_list[-1],\
-            "ks range not covered by klist"
+    if(not isinstance(logks, float)):
+        assert logks[0] >= logk_list[0] and logks[-1] <= logk_list[-1],\
+                "ks range not covered by klist"
 
-    logPs = np.zeros(len(logks))
     index = 0
     for i in range(len(logk_list)-1):
         assert logk_list[i+1] > logk_list[i], "Ks not in ascending order"
@@ -333,6 +333,7 @@ def mcmc_spline_runner(k0, p0,
     
     finds likelihood based on spline points
     TODO: figure out how to pass in something like kwargs without cobaya freaking out
+    currently takes about 0.075 secs to run
     '''
 
     numknots = 2
@@ -345,30 +346,34 @@ def mcmc_spline_runner(k0, p0,
 
     if(k2 is not None):
         if(k2 < k1):
-            raise AttributeError("Ks not in sorted order") 
+            return -1e100
         numknots += 1
         logks_list.append(k2)
         logps_list.append(p2)
     if(k3 is not None):
         if(k3 < k2):
+            return -1e100
             raise AttributeError("Ks not in sorted order") 
         numknots += 1
         logps_list.append(p3)
         logks_list.append(k3)
     if(k4 is not None):
         if(k4 < k3):
+            return -1e100
             raise AttributeError("Ks not in sorted order") 
         numknots += 1
         logps_list.append(p4)
         logks_list.append(k4)
     if(k5 is not None):
         if(k5 < k4):
+            return -1e100
             raise AttributeError("Ks not in sorted order") 
         numknots += 1
         logps_list.append(p5)
         logks_list.append(k5)
     if(k6 is not None):
         if(k6 < k5):
+            return -1e100
             raise AttributeError("Ks not in sorted order")  
         numknots += 1
         logps_list.append(p6)
@@ -382,7 +387,7 @@ def mcmc_spline_runner(k0, p0,
     likelihood = power_spec_likelihood(power_spectrum)
     return likelihood
 
-def get_spline_infodict():
+def get_spline_infodict(output):
     info = {"likelihood": 
         {
             "power":mcmc_spline_runner
@@ -391,21 +396,23 @@ def get_spline_infodict():
 
     info["params"] = {
         "k0": -5.2,
-        "k2": -0.3,
+        "k3": -0.3,
         "k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
+        "k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
         "p0": {"prior": {"min": 0, "max": 3}, "ref": 2.99, "proposal": 0.01},
         "p1": {"prior": {"min": 0, "max": 3}, "ref": 2.99, "proposal": 0.01},
         "p2": {"prior": {"min": 0, "max": 3}, "ref": 0.5, "proposal": 0.01},
+        "p3": {"prior": {"min": 0, "max": 3}, "ref": 0.5, "proposal": 0.01},
     }
 
     info["sampler"] = {"mcmc": {"Rminus1_stop": 0.01, "max_tries": 1000}}
-    info["output"] = "temp_output2"
+    info["output"] = output
     return info
 
 def plot_info(info, sampler, outfile=None):
     gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
-    gdplot.triangle_plot(gdsamples, ["k1", "p0", "p1", "p2"], filled=True)
+    gdplot.triangle_plot(gdsamples, ["k1", "k2", "p0", "p1", "p2", "p3"], filled=True)
     if(outfile is None):
         plt.show()
     else:
@@ -415,22 +422,152 @@ def save_info(info, sampler, filename):
     with open(filename, 'wb') as f:
         pickle.dump((info, sampler), f)
 
-def spline_driver():
+def spline_driver(output):
     transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50)
     global_var['measured_power'] = total_powers
     global_var['transfer'] = transfer 
     # test to make sure the likelihood function works
     print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2))
-    info_dict = get_spline_infodict()
+    info_dict = get_spline_infodict(output)
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
-def main():
-    updated_info, sampler = spline_driver()
-    filename='temp.pickle'
-    plot_info(updated_info, sampler)
+def calc_logp(k, theta, k0=-5.2, kn=-0.3):
+    '''
+    Provides a value for the logspline depending on the parameters given in theta
+
+    Assumes parameters in theta are in the order [p0, k1, p1, k2 ... kn-1, pn-1, pn]
+    '''
     
+    num_params = len(theta)
+    assert(num_params %2 == 0)
+    num_ps = int(num_params/2 + 1)
+    num_ks = int(num_params/2 - 1)
+
+    logp_list = []
+    logk_list = [k0]
+    
+    for i in range(num_params):
+        if(i == num_params -1 ):
+            logp_list.append(theta[i])
+        elif(i % 2 == 0):
+            logp_list.append(theta[i])
+        else:
+            logk_list.append(theta[i])
+    logk_list.append(kn)
+
+    
+    logp = construct_logspline(logk_list, logp_list, np.power(10., k))
+    return logp 
+
+def get_uniform_sample(range_list, nsamples=100):
+    samples = np.zeros((nsamples, len(range_list)))
+    for i, r in enumerate(range_list):
+        samples[:,i] = np.random.uniform(low=r[0], high=r[1], size=nsamples)
+    return samples 
+
+def fgivenx_contours_logp(priors, variables, file_root):
+    '''
+    Plots the likelihood contours for log of the power spectrum with the fgivenx library
+
+    priors: a list of (min, max) for priors on the variables
+    variables: a list of strings indicating which variables ran through the mcmc in the oder
+                corresponding to the priors 
+    file_root: the folder/prefix for the mcmc output
+    '''
     
 
+    samples, weights = samples_from_getdist_chains(variables, file_root)
+    uniform_samples = get_uniform_sample(priors)
+    uniform_weights = np.ones(len(uniform_samples))
+
+    k = np.linspace(-5.1, -0.4, 100)
+    
+    fig, axes = plt.subplots(1, 2)
+
+    axes[0].set_xlim([-6, 1])
+    axes[0].set_ylim([0, 5])
+    axes[1].set_xlim([-6, 1])
+    axes[1].set_ylim([0, 5])
+
+    axes[0].set_xlabel('Log(k) Wavenumber')
+    axes[1].set_xlabel('Log(k) Wavenumber')
+    axes[0].set_ylabel('Log(P) Power')
+
+    plot_contours(calc_logp, k, uniform_samples, weights=uniform_weights, 
+                    ax=axes[1], colors=plt.cm.Blues_r, lines=False)
+    cbar = plot_contours(calc_logp, k, samples, weights=weights, 
+                    ax=axes[1], colors=plt.cm.Reds_r)
+    
+    plot_lines(calc_logp, k, uniform_samples, weights=uniform_weights, ax=axes[0], color='b')
+    plot_lines(calc_logp, k, samples, weights=weights, ax=axes[0], color='r')
+
+    cbar = plt.colorbar(cbar,ticks=[0,1,2,3])
+    cbar.set_ticklabels(['',r'$1\sigma$',r'$2\sigma$',r'$3\sigma$'])
+ 
+    plt.show()
+
+def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=0, pmax=5):
+    priors_k = [kmin, kmax]
+    priors_p = [pmin, pmax]
+
+    variables = []
+    priors = []
+    for i in range(num_knots):
+        pvar = 'p' + str(i)
+        kvar = 'k' + str(i)
+        if(i == 0 or i == num_knots -1):
+            variables.append(pvar)
+            priors.append(priors_p)
+        else:
+            variables.append(kvar)
+            priors.append(priors_k)
+            variables.append(pvar)
+            priors.append(priors_p)
+            
+    
+    return variables, priors 
+
+def lensing_test():
+    #Plot CMB lensing potential power for various values of w
+    pars = camb.CAMBparams()
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+    
+    pars.set_for_lmax(2000, lens_potential_accuracy=1)
+    
+    w=-1
+    pars.set_dark_energy(w=w, wa=0, dark_energy_model='fluid') 
+    for As in [1e-9, 2e-9, 3e-9]:
+        pars.InitPower.set_params(As=As, ns=0.965)
+        time0 = time.time()
+        results = camb.get_results(pars)
+        cl = results.get_lens_potential_cls(lmax=2000)
+        print('time: ' + str(time.time()-time0))
+        plt.loglog(np.arange(2001), cl[:,0])
+
+    plt.legend([1e-9, 2e-9, 3e-9])
+    plt.ylabel('$[L(L+1)]^2C_L^{\phi\phi}/2\pi$')
+    plt.xlabel('$L$')
+    plt.xlim([2,2000])
+    plt.show()
+    
+def main():
+    updated_info, sampler = spline_driver()
+    plot_info(updated_info, sampler)
+    file_root = 'temp_output2/temp_output2'
+    variables, priors = get_priors_and_variables(3)
+    fgivenx_contours_logp(priors, variables, file_root)
+
+
 if __name__ == '__main__':
-    main()
+    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50)
+    global_var['measured_power'] = total_powers
+    global_var['transfer'] = transfer 
+    time0 = time.time()
+    mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2)
+    time1 = time.time()
+    print('time: ' + str(time1-time0))
+    #lensing_test()
+    #main()
+
+

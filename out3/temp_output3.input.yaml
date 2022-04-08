@@ -1,0 +1,46 @@
+likelihood:
+  power: true
+params:
+  k0: -5.2
+  k3: -0.3
+  k1:
+    prior:
+      min: -5.2
+      max: -0.3
+    ref: -3
+    proposal: 0.01
+  k2:
+    prior:
+      min: -5.2
+      max: -0.3
+    ref: -2
+    proposal: 0.01
+  p0:
+    prior:
+      min: 0
+      max: 3
+    ref: 2.99
+    proposal: 0.01
+  p1:
+    prior:
+      min: 0
+      max: 3
+    ref: 2.99
+    proposal: 0.01
+  p2:
+    prior:
+      min: 0
+      max: 3
+    ref: 0.5
+    proposal: 0.01
+  p3:
+    prior:
+      min: 0
+      max: 3
+    ref: 0.5
+    proposal: 0.01
+sampler:
+  mcmc:
+    Rminus1_stop: 0.01
+    max_tries: 1000
+output: temp_output3
