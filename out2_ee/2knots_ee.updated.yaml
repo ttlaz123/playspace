@@ -1,0 +1,70 @@
+theory: null
+likelihood:
+  power:
+    type: []
+    speed: -1
+    stop_at_error: false
+    version: null
+    external: true
+    input_params:
+    - k0
+    - k1
+    - p0
+    - p1
+    - spectrum_type
+    output_params: []
+params:
+  k0:
+    value: -5.2
+  k1:
+    value: -0.3
+  p0:
+    prior:
+      min: -20
+      max: 20
+    ref: 2.99
+    proposal: 0.01
+  p1:
+    prior:
+      min: -20
+      max: 20
+    ref: 2.99
+    proposal: 0.01
+  spectrum_type:
+    value: 1
+sampler:
+  mcmc:
+    burn_in: 0
+    max_tries: 1000
+    covmat: null
+    covmat_params: null
+    proposal_scale: 2.4
+    output_every: 60s
+    learn_every: 40d
+    learn_proposal: true
+    learn_proposal_Rminus1_max: 2.0
+    learn_proposal_Rminus1_max_early: 30.0
+    learn_proposal_Rminus1_min: 0.0
+    max_samples: .inf
+    Rminus1_stop: 0.01
+    Rminus1_cl_stop: 0.2
+    Rminus1_cl_level: 0.95
+    Rminus1_single_split: 4
+    measure_speeds: true
+    oversample_power: 0.4
+    oversample_thin: true
+    drag: false
+    blocking:
+    - - true
+      - - p0
+        - p1
+    callback_function: null
+    callback_every: null
+    seed: null
+    check_every: null
+    oversample: null
+    drag_limits: null
+    fallback_covmat_scale: 4
+    version: 3.1.1
+output: 2knots_ee
+version: 3.1.1

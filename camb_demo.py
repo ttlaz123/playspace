@@ -156,7 +156,7 @@ def likelihood_cl(measured, error, theory):
         loglikelihood += gaussian_likelihood(measured[i], theory[i], error[i])
     return loglikelihood 
 
-def transfer_p_to_c(ks, pk, transfer):
+def transfer_p_to_c(ks, pk, transfer, spectrum_type=0):
     '''
         converts P(k) into C(l) using CAMB transfer functions
         TODO: currently takes about 0.02 sec
@@ -167,7 +167,16 @@ def transfer_p_to_c(ks, pk, transfer):
     norm_pk = [pk[i]/ks[i] for i in range(len(ks))]
 
     integral = trans_squared.dot(norm_pk)
-    cl = np.array([integral[i] * (i) * (i+1) for i in range(len(integral))])
+    
+    p = 1
+    if(spectrum_type== 1 or spectrum_type ==2):
+        p=3
+    if(spectrum_type== 3):
+        p=2
+    
+    
+    cl = np.array([integral[i] * ((i) * (i+1))**p #*((l+1)*(l+2)/(l-1)/l)**(p/2)
+                    for i in range(len(integral))])
     return cl 
 
 def construct_line(x1, y1, x2, y2, xs):
@@ -201,7 +210,9 @@ def construct_logspline(logk_list, logP_list, ks):
 
     index = 0
     for i in range(len(logk_list)-1):
-        assert logk_list[i+1] > logk_list[i], "Ks not in ascending order"
+        assert logk_list[i+1] > logk_list[i], \
+        ("Ks not in ascending order: " + 
+        'k' + str(i+1) + ': ' + str(logk_list[i+1]) + ', k' + str(i) + ': ' + str(logk_list[i]))
     k = sp.symbols('k')
     piecewise = sp.interpolating_spline(1, k, logk_list, logP_list)
     spline_func = sp.lambdify(k,piecewise)
@@ -260,7 +271,7 @@ def get_infodict(measured):
     return info
 
 
-def get_default_instance(lmax, accuracy, lsample):
+def get_default_instance(lmax, accuracy, lsample, spectrum_type='TT'):
     '''
     Gives default transfer functions and 
     '''
@@ -270,7 +281,22 @@ def get_default_instance(lmax, accuracy, lsample):
     pars.set_for_lmax(lmax=lmax-40) # idk why it's offset by 50
     powers, transfer = get_transfer_and_power(pars, lmax)
     
-    total_powers_T = powers['total'][:,0]
+
+    ind = spectrum_type
+    if(spectrum_type == 'TT'):
+        ind = 0
+    elif(spectrum_type == 'EE'):
+        ind = 1
+    elif(spectrum_type == 'BB'):
+        ind = 2
+    elif(spectrum_type == 'TE'):
+        ind = 3
+    elif(isinstance(spectrum_type, int)):
+        ind = spectrum_type
+    else:
+        raise AttributeError('Spectrum type not correct: ' + str(spectrum_type))
+
+    total_powers_T = powers['total'][:,ind]
     print('Used multipoles: ' + str(transfer.L))
     print('Dimensions of Cl: ' + str(total_powers_T.shape))
 
@@ -293,7 +319,7 @@ def cobaya_demo_powerspectrum():
     gdplot.triangle_plot(gdsamples, ["ns", "As"], filled=True)
     plt.show()
 
-def power_spec_likelihood(power_spectrum, measured=None, err=None):
+def power_spec_likelihood(power_spectrum, measured=None, err=None, spectrum_type = 0):
     '''
     Given a power spectrum in P(k), a power spectrum in Cl, and error bars, 
     calculates the likelihood of the theory using Gaussian spread
@@ -302,22 +328,27 @@ def power_spec_likelihood(power_spectrum, measured=None, err=None):
     measured: array of floats representing Cl, if is None then will obtain from global_var
     err: array of floats, if None will default to 100 for all L
     '''
+    
     transfer = global_var['transfer']
     ks = transfer.q
-    transfer_mat = transfer.delta_p_l_k[0]
-    cl = transfer_p_to_c(ks, power_spectrum, transfer_mat)
+    
+    transfer_mat = transfer.delta_p_l_k[spectrum_type]
+    cl = transfer_p_to_c(ks, power_spectrum, transfer_mat, spectrum_type=spectrum_type)
     
     Ls = transfer.L 
     if(measured is None):
         measured=global_var['measured_power']
     measured = [measured[l] for l in Ls]
+    #plt.plot(cl)
+    #plt.plot(measured)
+    #plt.show()
     if(err is None):
-        err = [100 for i in range(len(Ls))]
-
+        err = [10 for i in range(len(Ls))]
     log_likelihood = likelihood_vector(measured, err, cl)
+    #print(log_likelihood)
     return log_likelihood
 
-def mcmc_spline_runner(k0, p0, 
+def mcmc_spline_runner(spectrum_type, k0, p0, 
                         k1=None, p1=None, 
                         k2=None, p2=None, 
                         k3=None, p3=None, 
@@ -384,35 +415,16 @@ def mcmc_spline_runner(k0, p0,
 
     logspline = spline_likelihood(logks_list,logps_list)
     power_spectrum = np.exp(logspline)
-    likelihood = power_spec_likelihood(power_spectrum)
+    
+    likelihood = power_spec_likelihood(power_spectrum, spectrum_type=int(spectrum_type))
     return likelihood
 
-def get_spline_infodict(output):
-    info = {"likelihood": 
-        {
-            "power":mcmc_spline_runner
-        }
-    }
 
-    info["params"] = {
-        "k0": -5.2,
-        "k3": -0.3,
-        "k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
-        "k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
-        "p0": {"prior": {"min": 0, "max": 3}, "ref": 2.99, "proposal": 0.01},
-        "p1": {"prior": {"min": 0, "max": 3}, "ref": 2.99, "proposal": 0.01},
-        "p2": {"prior": {"min": 0, "max": 3}, "ref": 0.5, "proposal": 0.01},
-        "p3": {"prior": {"min": 0, "max": 3}, "ref": 0.5, "proposal": 0.01},
-    }
 
-    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.01, "max_tries": 1000}}
-    info["output"] = output
-    return info
-
-def plot_info(info, sampler, outfile=None):
+def plot_info(info, sampler, variables, outfile=None):
     gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
-    gdplot.triangle_plot(gdsamples, ["k1", "k2", "p0", "p1", "p2", "p3"], filled=True)
+    gdplot.triangle_plot(gdsamples, variables, filled=True)
     if(outfile is None):
         plt.show()
     else:
@@ -422,15 +434,7 @@ def save_info(info, sampler, filename):
     with open(filename, 'wb') as f:
         pickle.dump((info, sampler), f)
 
-def spline_driver(output):
-    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50)
-    global_var['measured_power'] = total_powers
-    global_var['transfer'] = transfer 
-    # test to make sure the likelihood function works
-    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2))
-    info_dict = get_spline_infodict(output)
-    updated_info, sampler = run(info_dict, resume=True)
-    return updated_info, sampler
+
 
 def calc_logp(k, theta, k0=-5.2, kn=-0.3):
     '''
@@ -460,10 +464,28 @@ def calc_logp(k, theta, k0=-5.2, kn=-0.3):
     logp = construct_logspline(logk_list, logp_list, np.power(10., k))
     return logp 
 
-def get_uniform_sample(range_list, nsamples=100):
+def get_uniform_sample(range_list, variables, nsamples=100):
+    '''
+    range_list: list of (min, max)
+    variables: [p0, k1, p1, ... kn-1, pn-1, pn]
+    '''
     samples = np.zeros((nsamples, len(range_list)))
     for i, r in enumerate(range_list):
         samples[:,i] = np.random.uniform(low=r[0], high=r[1], size=nsamples)
+    
+    #TODO figure out how to sort the ks
+    k_inds = []
+
+    for i, v in enumerate(variables):
+        if(v[0] == 'k'):
+            k_inds.append(i)
+    k_inds = np.array(k_inds)
+    if(len(variables) == 2):
+        return samples
+    for i in range(samples.shape[0]):
+        k_samples = samples[i, k_inds]
+        samples[i, k_inds] = np.sort(k_samples)
+    
     return samples 
 
 def fgivenx_contours_logp(priors, variables, file_root):
@@ -478,7 +500,8 @@ def fgivenx_contours_logp(priors, variables, file_root):
     
 
     samples, weights = samples_from_getdist_chains(variables, file_root)
-    uniform_samples = get_uniform_sample(priors)
+    
+    uniform_samples = get_uniform_sample(priors, variables=variables)
     uniform_weights = np.ones(len(uniform_samples))
 
     k = np.linspace(-5.1, -0.4, 100)
@@ -550,24 +573,69 @@ def lensing_test():
     plt.xlabel('$L$')
     plt.xlim([2,2000])
     plt.show()
-    
+
+def spline_driver(output, spectrum_type):
+    '''
+    spectrum_type: 0=TT, 1=EE, 2=BB, 3=TE
+    '''
+    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=spectrum_type)
+    global_var['measured_power'] = total_powers
+    global_var['transfer'] = transfer 
+    # test to make sure the likelihood function works
+    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=2.99, p1=2.99, p2=0.5, spectrum_type=spectrum_type))
+    info_dict = get_spline_infodict(output, spectrum_type)
+    updated_info, sampler = run(info_dict, resume=True)
+    return updated_info, sampler
+
+
+def get_spline_infodict(output, spectrum_type):
+    info = {"likelihood": 
+        {
+            "power":mcmc_spline_runner
+        }
+    }
+
+    info["params"] = {
+        "k0": -5.2,
+        "k1": -0.3,
+        #"k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
+        #"k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
+        "p0": {"prior": {"min": -20, "max": 20}, "ref": 2.99, "proposal": 0.01},
+        "p1": {"prior": {"min": -20, "max": 20}, "ref": 2.99, "proposal": 0.01},
+        #"p2": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
+        #"p3": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
+        'spectrum_type': spectrum_type
+    }
+
+    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.01, "max_tries": 1000}}
+    info["output"] = output
+    return info
+
 def main():
-    updated_info, sampler = spline_driver()
-    plot_info(updated_info, sampler)
-    file_root = 'temp_output2/temp_output2'
-    variables, priors = get_priors_and_variables(3)
+    file_root = 'test/test'
+    variables, priors = get_priors_and_variables(2)
+    updated_info, sampler = spline_driver(file_root, spectrum_type=1)
+    plot_info(updated_info, sampler, variables)
+    
+    
+    print(variables)
+    print(priors)
     fgivenx_contours_logp(priors, variables, file_root)
 
 
 if __name__ == '__main__':
-    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50)
+    '''
+    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type='BB')
     global_var['measured_power'] = total_powers
     global_var['transfer'] = transfer 
     time0 = time.time()
-    mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2)
+    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2))
     time1 = time.time()
     print('time: ' + str(time1-time0))
+    plt.plot(total_powers)
+    plt.show()
     #lensing_test()
-    #main()
+    '''
+    main()
 
 
