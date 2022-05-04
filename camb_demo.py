@@ -17,7 +17,7 @@ import getdist.plots as gdplt
 camb_path = os.path.realpath(os.path.join(os.getcwd(),'..'))
 sys.path.insert(0,camb_path)
 import camb
-from camb import model, initialpower
+from camb import model, initialpower, correlations
 
 from fgivenx import plot_contours, samples_from_getdist_chains, plot_lines, plot_dkl
 
@@ -130,9 +130,14 @@ def likelihood_vector(measured, error, theory):
     Performs the vector operations to save computational time
     '''
     assert(len(measured) == len(error))
-    assert(len(measured) == len(theory))
+    assert len(measured) == len(theory), "measured: " + str(len(measured)) + " theory: " + str(len(theory))
     loglikelihood=0
 
+    while(measured[0]/measured[1] < 1e-3 or theory[0]/theory[1] < 1e-3):
+        measured = measured[1:]
+        theory = theory[1:]
+        error = error[1:]
+    
     coeff_list = -np.log(2*np.pi*(np.power(error,2)))/2
     coeff_sum = np.sum(coeff_list)
 
@@ -150,7 +155,7 @@ def likelihood_cl(measured, error, theory):
         assumes gaussian error bars
     '''
     assert(len(measured) == len(error))
-    assert(len(measured) == len(theory))
+    assert len(measured) == len(theory), "measured: " + str(len(measured)) + " theory: " + str(len(theory))
     loglikelihood=0
     for i in range(len(measured)):
         loglikelihood += gaussian_likelihood(measured[i], theory[i], error[i])
@@ -162,19 +167,22 @@ def transfer_p_to_c(ks, pk, transfer, spectrum_type=0):
         TODO: currently takes about 0.02 sec
     '''
     assert(ks.shape[0] == pk.shape[0])
-    assert(ks.shape[0] == transfer.shape[1])
-    trans_squared = np.square(transfer)
+    assert(ks.shape[0] == transfer.delta_p_l_k[0].shape[1])
     norm_pk = [pk[i]/ks[i] for i in range(len(ks))]
-
-    integral = trans_squared.dot(norm_pk)
-    
-    p = 1
-    if(spectrum_type== 1 or spectrum_type ==2):
-        p=3
+    if(spectrum_type < 3):
+        trans_squared = np.square(transfer.delta_p_l_k[spectrum_type])
+   
+        integral = trans_squared.dot(norm_pk)
+        
+        p = 1
+        if(spectrum_type== 1 or spectrum_type ==2):
+            p=3
     if(spectrum_type== 3):
+        trans_squared = np.multiply(transfer.delta_p_l_k[0], transfer.delta_p_l_k[1])
+        
+        integral = trans_squared.dot(norm_pk)
         p=2
-    
-    
+
     cl = np.array([integral[i] * ((i) * (i+1))**p #*((l+1)*(l+2)/(l-1)/l)**(p/2)
                     for i in range(len(integral))])
     return cl 
@@ -236,39 +244,8 @@ def spline_likelihood(logk_list, logP_list, err=None, measured=None, lmax=2400):
     return pk_spline
 
 
-def cosmos_likelihood(ns, As, err=None, measured=None,  lmax=2400):
-    '''
-        Calculates the likelihood of particular cosmological parameters given data
-    '''
-    
-    pars = camb.CAMBparams()
-    pars.set_for_lmax(lmax=lmax)
-    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-    pars.InitPower.set_params(ns=ns, As=As)
-    pars.set_accuracy()
-    #data = camb.get_transfer_functions(pars)
-    #transfer = data.get_cmb_transfer_data()
-    transfer = global_var['transfer']
-    ks = transfer.q
-    power_k = pars.scalar_power(ks)
-    log_likelihood = power_spec_likelihood(power_spectrum, measured=measured, err=err)
-    return log_likelihood
 
-def get_infodict(measured):
-    info = {"likelihood": 
-        {
-            "power":cosmos_likelihood 
-        }
-    }
 
-    info["params"] = {
-        "ns": {"prior": {"min": 0, "max": 1}, "ref": 0.5, "proposal": 0.01},
-        "As": {"prior": {"min": 0, "max": 1e100}, "ref": 0.5, "proposal": 0.01},
-        #"err": {"prior": {"min": 0, "max": 1e100}, "ref": 0.5, "proposal": 0.01}
-    }
-
-    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.001, "max_tries": 1000}}
-    return info
 
 
 def get_default_instance(lmax, accuracy, lsample, spectrum_type='TT'):
@@ -277,6 +254,8 @@ def get_default_instance(lmax, accuracy, lsample, spectrum_type='TT'):
     '''
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+    pars.InitPower.set_params(r=0.01)
+    pars.WantTensors=True
     pars.set_accuracy(AccuracyBoost=accuracy, lSampleBoost=lsample)
     pars.set_for_lmax(lmax=lmax-40) # idk why it's offset by 50
     powers, transfer = get_transfer_and_power(pars, lmax)
@@ -319,33 +298,49 @@ def cobaya_demo_powerspectrum():
     gdplot.triangle_plot(gdsamples, ["ns", "As"], filled=True)
     plt.show()
 
-def power_spec_likelihood(power_spectrum, measured=None, err=None, spectrum_type = 0):
+def power_spec_likelihood(power_spectrum, measured=None, err=5., spectrum_type = 0, lensing=False, plot=True):
     '''
     Given a power spectrum in P(k), a power spectrum in Cl, and error bars, 
     calculates the likelihood of the theory using Gaussian spread
     
     power_spectrum: array of floats representing p(k), ks is in global_var
     measured: array of floats representing Cl, if is None then will obtain from global_var
-    err: array of floats, if None will default to 100 for all L
+    err: array of floats, if float, then will default to same err for all L
     '''
     
     transfer = global_var['transfer']
     ks = transfer.q
     
     transfer_mat = transfer.delta_p_l_k[spectrum_type]
-    cl = transfer_p_to_c(ks, power_spectrum, transfer_mat, spectrum_type=spectrum_type)
+    
+    if(not isinstance(lensing, bool)):
+        num_specs = 4
+        clls = np.zeros(( len(transfer_mat[:,0]), num_specs))
+        
+        for i in range(num_specs):
+            clls[:, i] = transfer_p_to_c(ks, power_spectrum, transfer, spectrum_type=i)
+        cl = correlations.lensed_cls(clls,lensing[:,0])[:,spectrum_type]
+    else:
+        cl = transfer_p_to_c(ks, power_spectrum, transfer, spectrum_type=spectrum_type)
     
     Ls = transfer.L 
     if(measured is None):
         measured=global_var['measured_power']
     measured = [measured[l] for l in Ls]
-    #plt.plot(cl)
-    #plt.plot(measured)
-    #plt.show()
-    if(err is None):
-        err = [10 for i in range(len(Ls))]
+    
+    random_scale_factor = 2e9##TODO figure out why this is the case
+    cl = cl*random_scale_factor
+
+    if(isinstance(err, float) or isinstance(err, int)):
+        err = [err for i in range(len(Ls))]
     log_likelihood = likelihood_vector(measured, err, cl)
-    #print(log_likelihood)
+    if(plot):
+        print(cl)
+        plt.plot(cl, label='Transfered')
+        plt.plot(measured, label='Data')
+        plt.legend()
+        plt.show()
+        print("Log likelihood: " + str(log_likelihood))
     return log_likelihood
 
 def mcmc_spline_runner(spectrum_type, k0, p0, 
@@ -356,7 +351,7 @@ def mcmc_spline_runner(spectrum_type, k0, p0,
                         k5=None, p5=None, 
                         k6=None, p6=None, 
                         k7=None, p7=None, 
-                        k8=None, p8=None):
+                        k8=None, p8=None, err=5.):
     '''
     Input:
      k0, k1, k2, ..., kn
@@ -416,12 +411,18 @@ def mcmc_spline_runner(spectrum_type, k0, p0,
     logspline = spline_likelihood(logks_list,logps_list)
     power_spectrum = np.exp(logspline)
     
-    likelihood = power_spec_likelihood(power_spectrum, spectrum_type=int(spectrum_type))
+    likelihood = power_spec_likelihood(power_spectrum, spectrum_type=int(spectrum_type), err=err, plot=False)
     return likelihood
 
 
 
 def plot_info(info, sampler, variables, outfile=None):
+    '''
+    info: yaml dictionary
+    sampler: sampling output result from a cobaya run
+    variables: list of variables to plot ['var1', 'var2', ...]
+    outfile: path to location to save plot, if none, then simply shows plot
+    '''
     gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
     gdplot.triangle_plot(gdsamples, variables, filled=True)
@@ -508,10 +509,10 @@ def fgivenx_contours_logp(priors, variables, file_root):
     
     fig, axes = plt.subplots(1, 2)
 
-    axes[0].set_xlim([-6, 1])
-    axes[0].set_ylim([0, 5])
-    axes[1].set_xlim([-6, 1])
-    axes[1].set_ylim([0, 5])
+    axes[0].set_xlim([min(k), max(k)])
+    axes[0].set_ylim([priors[0][0],priors[0][-1]])
+    axes[1].set_xlim([min(k), max(k)])
+    axes[1].set_ylim([priors[0][0],priors[0][-1]])
 
     axes[0].set_xlabel('Log(k) Wavenumber')
     axes[1].set_xlabel('Log(k) Wavenumber')
@@ -530,7 +531,11 @@ def fgivenx_contours_logp(priors, variables, file_root):
  
     plt.show()
 
-def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=0, pmax=5):
+def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=-30, pmax=-20):
+    '''
+    returns variables = [p0, k1, p1, ... kn-1, pn-1, pn]
+            priors = [(min, max), (min, max), etc]
+    '''
     priors_k = [kmin, kmax]
     priors_p = [pmin, pmax]
 
@@ -560,15 +565,23 @@ def lensing_test():
     
     w=-1
     pars.set_dark_energy(w=w, wa=0, dark_energy_model='fluid') 
+    
     for As in [1e-9, 2e-9, 3e-9]:
         pars.InitPower.set_params(As=As, ns=0.965)
         time0 = time.time()
+        
         results = camb.get_results(pars)
+        powers = results.get_cmb_power_spectra(pars, CMB_unit='muK',lmax=2000)
+        print(powers['unlensed_total'].shape)
         cl = results.get_lens_potential_cls(lmax=2000)
+        print(cl[:,0].shape)
+        lensed_cl = correlations.lensed_cls(powers['unlensed_total'],cl[:,0])
         print('time: ' + str(time.time()-time0))
-        plt.loglog(np.arange(2001), cl[:,0])
+        plt.plot(np.arange(2001), lensed_cl[:,1], label='lensed: ' + str(As))
+        plt.plot(np.arange(2001), powers['unlensed_total'][:,1], label='unlensed: ' + str(As))
 
-    plt.legend([1e-9, 2e-9, 3e-9])
+    #plt.legend([1e-9, 2e-9, 3e-9])
+    plt.legend()
     plt.ylabel('$[L(L+1)]^2C_L^{\phi\phi}/2\pi$')
     plt.xlabel('$L$')
     plt.xlim([2,2000])
@@ -582,11 +595,54 @@ def spline_driver(output, spectrum_type):
     global_var['measured_power'] = total_powers
     global_var['transfer'] = transfer 
     # test to make sure the likelihood function works
-    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=2.99, p1=2.99, p2=0.5, spectrum_type=spectrum_type))
+    print(mcmc_spline_runner(spectrum_type=spectrum_type, p0=-28, p1=-25,k0=-5.2, k1=-0.3, err=0.01))#, p2=0.5, # k2=-0.3, ))
     info_dict = get_spline_infodict(output, spectrum_type)
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
+def cosmos_likelihood(ns, As, err=5, measured=None, lensing=True, lmax=2000, plot=True):
+    '''
+        Calculates the likelihood of particular cosmological parameters given data
+    '''
+    
+    pars = camb.CAMBparams()
+    pars.set_for_lmax(lmax=lmax)
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+    
+    pars.set_accuracy()
+    #data = camb.get_transfer_functions(pars)
+    #transfer = data.get_cmb_transfer_data()
+    transfer = global_var['transfer']
+    ks = transfer.q
+    pars.InitPower.set_params(ns=ns, As=As)
+    power_k = pars.scalar_power(ks)
+    if(lensing):
+        
+        results = camb.get_results(pars)
+        lensing = results.get_lens_potential_cls(lmax=lmax)
+
+    log_likelihood = power_spec_likelihood(power_k, measured=measured, err=err, lensing=lensing, plot = plot)
+    return log_likelihood
+
+def get_infodict(output, spectrum_type):
+    info = {"likelihood": 
+        {
+            "power":cosmos_likelihood 
+        }
+    }
+
+    info["params"] = {
+        "ns": {"prior": {"min": 0, "max": 1}, "ref": 0.5, "proposal": 0.01},
+        "As": {"prior": {"min": 0, "max": 1e-8}, "ref": 2e-9, "proposal": 1e-11},
+        #"err": {"prior": {"min": 0, "max": 1e100}, "ref": 0.5, "proposal": 0.01}
+        #'spectrum_type': spectrum_type,
+        'err': 100,
+        'plot': False,
+    }
+
+    info["sampler"] = {"mcmc": {"Rminus1_stop": 1, "max_tries": 10000}}
+    info["output"] = output
+    return info
 
 def get_spline_infodict(output, spectrum_type):
     info = {"likelihood": 
@@ -600,42 +656,63 @@ def get_spline_infodict(output, spectrum_type):
         "k1": -0.3,
         #"k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
         #"k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
-        "p0": {"prior": {"min": -20, "max": 20}, "ref": 2.99, "proposal": 0.01},
-        "p1": {"prior": {"min": -20, "max": 20}, "ref": 2.99, "proposal": 0.01},
+        "p0": {"prior": {"min": -30, "max": -20}, "ref": -25, "proposal": 0.01},
+        "p1": {"prior": {"min": -30, "max": -20}, "ref": -25, "proposal": 0.01},
         #"p2": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
         #"p3": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
-        'spectrum_type': spectrum_type
+        'spectrum_type': spectrum_type,
+        'err': 0.01
     }
 
-    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.01, "max_tries": 1000}}
+    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.1, "max_tries": 1000}}
     info["output"] = output
     return info
 
 def main():
-    file_root = 'test/test'
-    variables, priors = get_priors_and_variables(2)
-    updated_info, sampler = spline_driver(file_root, spectrum_type=1)
+    file_root = 'lensing/lensing_test'
+    spectrum_type = 0
+    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=0)
+    global_var['measured_power'] = total_powers
+    global_var['transfer'] = transfer 
+
+    info_dict = get_infodict(file_root, spectrum_type)
+    #variables, priors = get_priors_and_variables(2)
+    #print(cosmos_likelihood(ns=7.611533, As=2.826542e-12, err=100))
+    print(cosmos_likelihood(ns=0.5, As=3e-9, err=100))
+    updated_info, sampler = run(info_dict, resume=True)
+    variables=('ns','As')
+    #updated_info, sampler = spline_driver(file_root, spectrum_type=2)
     plot_info(updated_info, sampler, variables)
     
-    
+    '''
     print(variables)
     print(priors)
     fgivenx_contours_logp(priors, variables, file_root)
-
+    '''
 
 if __name__ == '__main__':
+    
+    #transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type='TT')
+    #global_var['measured_power'] = total_powers
+    #global_var['transfer'] = transfer 
     '''
-    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type='BB')
-    global_var['measured_power'] = total_powers
-    global_var['transfer'] = transfer 
     time0 = time.time()
-    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2))
+    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2, spectrum_type=0))
     time1 = time.time()
     print('time: ' + str(time1-time0))
     plt.plot(total_powers)
     plt.show()
+    '''
     #lensing_test()
     '''
+    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=0)
+    global_var['measured_power'] = total_powers
+    global_var['transfer'] = transfer 
+    cosmos_likelihood(0.9, 2e-9)
+    '''
+    #print(cosmos_likelihood(ns=7.611533, As=2.826542e-12, err=100, lensing=False))
+    #print(cosmos_likelihood(ns=0.96, As=2e-9, err=100, lensing=False))
+    #print(cosmos_likelihood(ns=0.96, As=2e-9, err=100, lensing=True))
     main()
 
 
