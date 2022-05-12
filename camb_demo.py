@@ -103,14 +103,14 @@ def get_transfer_and_power(pars, lmax):
     transfer = data.get_cmb_transfer_data()
     return powers, transfer
 
-def power_k(ns, As, kstar, klist):
+def power_k(ns, As, klist, kstar=1/20):
     '''
     Calculates P(k) = As*(k/kstar)^ns
     
     As, float
     ns, float
     klist, list of float
-    kstar, float
+    kstar, float (for some reason kstar is 1/20)
     '''
     pk = np.zeros(klist.shape[0])
     pk = As*(klist/kstar)**(ns-1)
@@ -275,7 +275,7 @@ def get_default_instance(lmax, accuracy, lsample, spectrum_type='TT'):
     else:
         raise AttributeError('Spectrum type not correct: ' + str(spectrum_type))
 
-    total_powers_T = powers['total'][:,ind]
+    total_powers_T = powers['lensed_scalar'][:,ind]
     print('Used multipoles: ' + str(transfer.L))
     print('Dimensions of Cl: ' + str(total_powers_T.shape))
 
@@ -310,7 +310,7 @@ def power_spec_likelihood(power_spectrum, measured=None, err=5., spectrum_type =
     
     transfer = global_var['transfer']
     ks = transfer.q
-    
+    spectrum_type = int(spectrum_type)
     transfer_mat = transfer.delta_p_l_k[spectrum_type]
     
     if(not isinstance(lensing, bool)):
@@ -336,8 +336,10 @@ def power_spec_likelihood(power_spectrum, measured=None, err=5., spectrum_type =
     log_likelihood = likelihood_vector(measured, err, cl)
     if(plot):
         print(cl)
-        plt.plot(cl, label='Transfered')
-        plt.plot(measured, label='Data')
+        plt.title('lensed_scalar')
+        plt.plot(cl[2:]-measured[2:])
+        #plt.plot(cl, label='Transfered')
+        #plt.plot(measured, label='Data')
         plt.legend()
         plt.show()
         print("Log likelihood: " + str(log_likelihood))
@@ -600,7 +602,7 @@ def spline_driver(output, spectrum_type):
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
-def cosmos_likelihood(ns, As, err=5, measured=None, lensing=True, lmax=2000, plot=True):
+def cosmos_likelihood(ns, As, err=5, measured=None, lensing=False, lmax=2000, plot=True):
     '''
         Calculates the likelihood of particular cosmological parameters given data
     '''
@@ -620,7 +622,7 @@ def cosmos_likelihood(ns, As, err=5, measured=None, lensing=True, lmax=2000, plo
         
         results = camb.get_results(pars)
         lensing = results.get_lens_potential_cls(lmax=lmax)
-
+    #print(lensing)
     log_likelihood = power_spec_likelihood(power_k, measured=measured, err=err, lensing=lensing, plot = plot)
     return log_likelihood
 
@@ -638,9 +640,10 @@ def get_infodict(output, spectrum_type):
         #'spectrum_type': spectrum_type,
         'err': 100,
         'plot': False,
+        #'lensing': False,
     }
 
-    info["sampler"] = {"mcmc": {"Rminus1_stop": 1, "max_tries": 10000}}
+    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.01, "max_tries": 10000}}
     info["output"] = output
     return info
 
@@ -669,7 +672,7 @@ def get_spline_infodict(output, spectrum_type):
     return info
 
 def main():
-    file_root = 'lensing/lensing_test'
+    file_root = 'lensing/lensing_test2'
     spectrum_type = 0
     transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=0)
     global_var['measured_power'] = total_powers
@@ -678,7 +681,7 @@ def main():
     info_dict = get_infodict(file_root, spectrum_type)
     #variables, priors = get_priors_and_variables(2)
     #print(cosmos_likelihood(ns=7.611533, As=2.826542e-12, err=100))
-    print(cosmos_likelihood(ns=0.5, As=3e-9, err=100))
+    print(cosmos_likelihood(ns=0.955, As=1.93e-9, err=100, lensing=True))
     updated_info, sampler = run(info_dict, resume=True)
     variables=('ns','As')
     #updated_info, sampler = spline_driver(file_root, spectrum_type=2)
@@ -691,28 +694,67 @@ def main():
     '''
 
 if __name__ == '__main__':
+    lmax = 2000
+    pars = camb.CAMBparams()
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+    ns = 0.8
+    As = 1.24e-9
+    kp=1/20
+    pars.InitPower.set_params(ns=ns, As=As)
+    #pars.WantTensors=False
+    pars.set_accuracy(lSampleBoost=50)
+    pars.set_for_lmax(lmax=lmax-40) # idk why it's offset by 40
+    results = camb.get_results(pars)
+    print('getting powers')
+    powers = results.get_cmb_power_spectra(pars, CMB_unit='muK')
+    print('getting transfer function data')
+    pars.set_for_lmax(lmax=lmax-150) #idk why by the lmax is offset by 150
+    data = camb.get_transfer_functions(pars)
+    print('getting transfer mat')
+    transfer = data.get_cmb_transfer_data()
+    ks = transfer.q
+    pk = [As*(k/kp)**(ns-1) for k in ks]
+    pk = pars.scalar_power(ks)
+    norm_pk = [pk[i]/ks[i] for i in range(len(ks))]
+    spectrum_type=1
+    if(spectrum_type < 3):
+        trans_squared = np.square(transfer.delta_p_l_k[spectrum_type])
+   
+        integral = trans_squared.dot(norm_pk)
+        
+        p = 1
+        if(spectrum_type== 1 or spectrum_type ==2):
+            p=3
+    if(spectrum_type== 3):
+        trans_squared = np.multiply(transfer.delta_p_l_k[0], transfer.delta_p_l_k[1])
+        
+        integral = trans_squared.dot(norm_pk)
+        p=2
+
+    cl = np.array([integral[i] * ((i) * (i+1))**p
+                    for i in range(len(integral))])
+    plt.plot(cl*2e9, label = 'transfered')
     
-    #transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type='TT')
-    #global_var['measured_power'] = total_powers
-    #global_var['transfer'] = transfer 
-    '''
-    time0 = time.time()
-    print(mcmc_spline_runner(k0=-5.2, k1=-3, k2=-0.3, p0=0.8, p1=0.9, p2=1.2, spectrum_type=0))
-    time1 = time.time()
-    print('time: ' + str(time1-time0))
-    plt.plot(total_powers)
+    ind = spectrum_type
+    total_powers_T = powers['lensed_scalar'][:,ind]
+    print(powers.keys())
+    #plt.plot((powers['unlensed_total'][:,ind]-powers['unlensed_scalar'][:,ind])[1:], label='total')
+    
+
+    plt.plot(powers['total'][:,ind], label='total')
+    plt.plot(powers['unlensed_scalar'][:,ind], label='unlensed_scalar')
+    plt.plot(powers['unlensed_total'][:,ind], label='unlensed_total')
+    #plt.plot(powers['lensed_scalar'][:,ind], label='lensed_scalar')
+    #plt.plot(powers['tensor'][:,ind], label='tensor')
+    #plt.plot(powers['lens_potential'][:,ind], label='lens_potential')
+    
+    plt.legend()
     plt.show()
-    '''
-    #lensing_test()
-    '''
-    transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=0)
-    global_var['measured_power'] = total_powers
-    global_var['transfer'] = transfer 
-    cosmos_likelihood(0.9, 2e-9)
-    '''
-    #print(cosmos_likelihood(ns=7.611533, As=2.826542e-12, err=100, lensing=False))
-    #print(cosmos_likelihood(ns=0.96, As=2e-9, err=100, lensing=False))
-    #print(cosmos_likelihood(ns=0.96, As=2e-9, err=100, lensing=True))
-    main()
+    plt.semilogy(powers['unlensed_scalar'][0:1999,ind]/cl/2e9, label='ratio between unlensed')
+    plt.semilogy(powers['lensed_scalar'][0:1999,ind]/cl/2e9, label = 'ratio between lensed')
+    plt.plot([0, 1999],[1,1], label = 'y=1')
+    plt.legend()
+    plt.show()
+    #main()
 
 
