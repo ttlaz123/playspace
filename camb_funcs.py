@@ -36,7 +36,7 @@ def transfer_p_to_c(ks, pk, transfer, spectrum_type=0):
     assert(ks.shape[0] == transfer.delta_p_l_k[0].shape[1])
     #alphas = alpha(l, 0, ks)
     delta_lnks = np.log(ks[1]/ks[0])
-    norm_pk = pk*delta_lnks
+    norm_pk = pk/ks#*delta_lnks
     if(spectrum_type < 3):
         trans_squared = np.square(transfer.delta_p_l_k[spectrum_type])
    
@@ -51,7 +51,7 @@ def transfer_p_to_c(ks, pk, transfer, spectrum_type=0):
         integral = trans_squared.dot(norm_pk)
         p=2
     ls = transfer.l
-    cl = np.array([integral[i] #* (ls[i])
+    cl = np.array([integral[i] * (ls[i]*(ls[i]+1))
                     #((transfer.l[i]+1)*(transfer.l[i]+2)/
                    # (transfer.l[i])/(transfer.l[i]-1) )**p
                    for i in range(len(integral))])
@@ -144,7 +144,7 @@ def compare_transfer_results():
     pars.set_accuracy(AccuracyBoost=1, lSampleBoost=50)
     transfer = get_transfer_functions(pars)
     ks = transfer.q
-
+    print(ks)
     print(transfer)
     ns = 0.96
     As = 2e-9
@@ -161,9 +161,9 @@ def compare_transfer_results():
     print(a[:100])
     div = a[0:2000]/cl[0:2000]
     print(np.polyfit(range(2000), div, 10))
-    plt.plot(div)
-    #plt.plot(a)
-    #plt.plot(transfer.l, cl*2e14)
+    #plt.plot(div)
+    plt.plot(a)
+    plt.plot(transfer.l, cl*2e9)
     plt.show()
 
 def main():
