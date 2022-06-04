@@ -17,6 +17,7 @@ print('Using CAMB %s installed at %s'%(camb.__version__,os.path.dirname(camb.__f
 
 from cobaya.run import run
 from getdist.mcsamples import MCSamplesFromCobaya
+from getdist.mcsamples import loadMCSamples
 import getdist.plots as gdplt
 
 from fgivenx import plot_contours, samples_from_getdist_chains, plot_lines, plot_dkl
@@ -260,6 +261,7 @@ def spline_driver(output, spectrum_type):
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
+
 def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=-25, pmax=-15):
     '''
     returns variables = [p0, k1, p1, ... kn-1, pn-1, pn]
@@ -285,14 +287,20 @@ def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=-25, pmax=-15
     
     return variables, priors 
 
-def plot_info(info, sampler, variables, outfile=None):
+
+def plot_info(variables=None, info=None, sampler=None, outfile=None, file_root=None):
     '''
     info: yaml dictionary
     sampler: sampling output result from a cobaya run
     variables: list of variables to plot ['var1', 'var2', ...]
     outfile: path to location to save plot, if none, then simply shows plot
     '''
-    gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
+    if(not (info is None or sampler is None)):
+        gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
+    elif(not file_root is None):
+        gdsamples = loadMCSamples(file_root)
+    else:
+        raise ValueError("No specified mc info")
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
     gdplot.triangle_plot(gdsamples, variables, filled=True)
     if(outfile is None):
@@ -398,7 +406,7 @@ def main():
     num_knots = 2
     variables, priors = get_priors_and_variables(num_knots)
     updated_info, sampler = spline_driver(output, spectrum_type)
-    plot_info(updated_info, sampler, variables)
+    plot_info(variables, updated_info, sampler)
     print(variables)
     print(priors)
     fgivenx_contours_logp(priors, variables, output)
@@ -424,7 +432,9 @@ def main2():
     plt.plot(cl2)
     plt.show()
 
+def main3():
+    plot_info(variables=['As', 'ns'], file_root="chains/mcmc")
 
 if __name__ == '__main__':
-    main()
+    main3()
     
