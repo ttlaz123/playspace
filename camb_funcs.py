@@ -1,3 +1,4 @@
+print('Importing Packages')
 import sys, platform, os
 import matplotlib
 from matplotlib import pyplot as plt
