@@ -303,7 +303,9 @@ def plot_info(variables=None, info=None, sampler=None, outfile=None, file_root=N
         raise ValueError("No specified mc info")
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
     gdplot.triangle_plot(gdsamples, variables, filled=True)
+    
     if(outfile is None):
+        print('showing plot')
         plt.show()
     else:
         plt.savefig(outfile)
@@ -433,8 +435,9 @@ def main2():
     plt.show()
 
 def main3():
-    plot_info(variables=['As', 'ns'], file_root="chains/mcmc")
-
+    print('plotting')
+    plot_info(variables=['As', 'ns', 'cosmomc_theta', 'ombh2', 'omch2', 'tau'], file_root="chains/mcmc",outfile='test2.png')
+    print('plotted')
 if __name__ == '__main__':
     main3()
     
