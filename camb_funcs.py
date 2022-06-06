@@ -7,6 +7,8 @@ from scipy import stats
 import sympy as sp
 import time
 import pickle
+import yaml
+import argparse
 
 #Assume installed from github using "git clone --recursive https://github.com/cmbant/CAMB.git"
 #This file is then in the docs folders
@@ -439,6 +441,20 @@ def main3():
     print('plotting')
     plot_info(variables=['As', 'ns', 'cosmomc_theta', 'ombh2', 'omch2', 'tau'], file_root="chains/mcmc",outfile='test2.png')
     print('plotted')
+
+def main4(args):
+    print('testing loading yaml')
+    if(args.yaml_file):
+        info_dict = yaml.load(open(args.yaml_file))
+    else:
+        info_dict = None 
+    info_dict['output'] = 'chains/mcmc_ptest'
+    updated_info, sampler = run(info_dict, resume=True)
+    return updated_info, sampler
+
 if __name__ == '__main__':
-    main3()
+    parser = argparse.Argument_Parser()
+    parser.add_argument('-y', '--yaml_file', help='path to yaml file')
+    args = parser.parse_args()
+    main4(args)
     
