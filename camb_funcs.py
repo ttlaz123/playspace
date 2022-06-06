@@ -445,10 +445,12 @@ def main3():
 def main4(args):
     print('testing loading yaml')
     if(args.yaml_file):
-        info_dict = yaml.load(open(args.yaml_file), Loader=yaml.BaseLoader)
+        info_dict = yaml.load(open(args.yaml_file), Loader=yaml.SafeLoader)
     else:
-        info_dict = None 
-    info_dict['output'] = 'chains/mcmc_ptest'
+        info_dict = get_spline_infodict('chains/mcmc_ptest', 0) 
+    info_dict['output'] = 'chains/mcmc_ptest1'
+    print('loaded yaml')
+    print(info_dict)
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
