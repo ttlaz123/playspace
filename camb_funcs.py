@@ -453,7 +453,7 @@ def main4(args):
     return updated_info, sampler
 
 if __name__ == '__main__':
-    parser = argparse.Argument_Parser()
+    parser = argparse.ArgumentParser()
     parser.add_argument('-y', '--yaml_file', help='path to yaml file')
     args = parser.parse_args()
     main4(args)
