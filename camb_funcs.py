@@ -445,7 +445,7 @@ def main3():
 def main4(args):
     print('testing loading yaml')
     if(args.yaml_file):
-        info_dict = yaml.load(open(args.yaml_file))
+        info_dict = yaml.load(open(args.yaml_file), Loader=yaml.BaseLoader)
     else:
         info_dict = None 
     info_dict['output'] = 'chains/mcmc_ptest'
