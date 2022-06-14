@@ -1,3 +1,4 @@
+print('Importing Packages')
 import sys, platform, os
 import matplotlib
 from matplotlib import pyplot as plt
@@ -18,7 +19,10 @@ from camb import model, initialpower, correlations
 print('Using CAMB %s installed at %s'%(camb.__version__,os.path.dirname(camb.__file__)))
 
 from cobaya.run import run
+from cobaya.model import get_model
+from cobaya.yaml import yaml_load
 from getdist.mcsamples import MCSamplesFromCobaya
+from getdist.mcsamples import loadMCSamples
 import getdist.plots as gdplt
 
 from fgivenx import plot_contours, samples_from_getdist_chains, plot_lines, plot_dkl
@@ -338,6 +342,7 @@ def spline_driver(output, spectrum_type,datafile=None):
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
+
 def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=-25, pmax=-15):
     '''
     returns variables = [p0, k1, p1, ... kn-1, pn-1, pn]
@@ -363,17 +368,25 @@ def get_priors_and_variables(num_knots, kmin=-5.2, kmax=-0.3, pmin=-25, pmax=-15
     
     return variables, priors 
 
-def plot_info(info, sampler, variables, outfile=None):
+
+def plot_info(variables=None, info=None, sampler=None, outfile=None, file_root=None):
     '''
     info: yaml dictionary
     sampler: sampling output result from a cobaya run
     variables: list of variables to plot ['var1', 'var2', ...]
     outfile: path to location to save plot, if none, then simply shows plot
     '''
-    gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
+    if(not (info is None or sampler is None)):
+        gdsamples = MCSamplesFromCobaya(info, sampler.products()["sample"])
+    elif(not file_root is None):
+        gdsamples = loadMCSamples(file_root)
+    else:
+        raise ValueError("No specified mc info")
     gdplot = gdplt.get_subplot_plotter(width_inch=5)
     gdplot.triangle_plot(gdsamples, variables, filled=True)
+    
     if(outfile is None):
+        print('showing plot')
         plt.show()
     else:
         plt.savefig(outfile)
@@ -469,6 +482,78 @@ def fgivenx_contours_logp(priors, variables, file_root):
     cbar.set_ticklabels(['',r'$1\sigma$',r'$2\sigma$',r'$3\sigma$'])
  
     plt.show()
+
+def model_wrapper(cl, info_dict):
+    '''
+    give likelihood based on cl and info dict
+    '''
+    model = get_model(info_dict)
+
+def test_model():
+    info_txt = r"""
+likelihood:
+  planck_2018_lowl.TT:
+  planck_2018_lowl.EE:
+  planck_2018_highl_plik.TTTEEE:
+  planck_2018_lensing.clik:
+theory:
+  classy:
+    extra_args: {N_ur: 2.0328, N_ncdm: 1}
+params:
+  logA:
+    prior: {min: 2, max: 4}
+    ref: {dist: norm, loc: 3.05, scale: 0.001}
+    proposal: 0.001
+    latex: \log(10^{10} A_\mathrm{s})
+    drop: true
+  A_s: {value: 'lambda logA: 1e-10*np.exp(logA)', latex: 'A_\mathrm{s}'}
+  n_s:
+    prior: {min: 0.8, max: 1.2}
+    ref: {dist: norm, loc: 0.96, scale: 0.004}
+    proposal: 0.002
+    latex: n_\mathrm{s}
+  H0:
+    prior: {min: 40, max: 100}
+    ref: {dist: norm, loc: 70, scale: 2}
+    proposal: 2
+    latex: H_0
+  omega_b:
+    prior: {min: 0.005, max: 0.1}
+    ref: {dist: norm, loc: 0.0221, scale: 0.0001}
+    proposal: 0.0001
+    latex: \Omega_\mathrm{b} h^2
+  omega_cdm:
+    prior: {min: 0.001, max: 0.99}
+    ref: {dist: norm, loc: 0.12, scale: 0.001}
+    proposal: 0.0005
+    latex: \Omega_\mathrm{c} h^2
+  m_ncdm: {renames: mnu, value: 0.06}
+  Omega_Lambda: {latex: \Omega_\Lambda}
+  YHe: {latex: 'Y_\mathrm{P}'}
+  tau_reio:
+    prior: {min: 0.01, max: 0.8}
+    ref: {dist: norm, loc: 0.06, scale: 0.01}
+    proposal: 0.005
+    latex: \tau_\mathrm{reio}
+"""
+
+
+    info = yaml_load(info_txt)
+    
+    model = get_model(info)
+    point = dict(zip(model.parameterization.sampled_params(),
+                 model.prior.sample(ignore_external=True)[0]))
+
+    point.update({'omega_b': 0.0223, 'omega_cdm': 0.120, 'H0': 67.01712,
+                'logA': 3.06, 'n_s': 0.966, 'tau_reio': 0.065})
+
+    logposterior = model.logposterior(point, as_dict=True)
+    print('Full log-posterior:')
+    print('   logposterior:', logposterior["logpost"])
+    print('   logpriors:', logposterior["logpriors"])
+    print('   loglikelihoods:', logposterior["loglikes"])
+    print('   derived params:', logposterior["derived"])
+
 def main():
     print('Executing main')
     parser = argparse.ArgumentParser()
@@ -506,7 +591,27 @@ def main2():
     plt.plot(cl2)
     plt.show()
 
+def main3():
+    print('plotting')
+    plot_info(variables=['As', 'ns', 'cosmomc_theta', 'ombh2', 'omch2', 'tau'], file_root="chains/mcmc",outfile='test2.png')
+    print('plotted')
+
+def main4(args):
+    print('testing loading yaml')
+    if(args.yaml_file):
+        info_dict = yaml_load(args.yaml_file)
+    else:
+        info_dict = get_spline_infodict('chains/mcmc_ptest', 0) 
+    info_dict['output'] = 'chains/mcmc_ptest1'
+    print('loaded yaml')
+    print(info_dict)
+    updated_info, sampler = run(info_dict, resume=True)
+    return updated_info, sampler
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-y', '--yaml_file', help='path to yaml file')
+    args = parser.parse_args()
+    test_model()
+    #main4(args)
     
