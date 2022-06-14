@@ -7,7 +7,7 @@ import sympy as sp
 import time
 import pickle 
 
-
+from cobaya.yaml import yaml_load
 from cobaya.run import run
 from getdist.mcsamples import MCSamplesFromCobaya
 import getdist.plots as gdplt
@@ -298,7 +298,7 @@ def cobaya_demo_powerspectrum():
     gdplot.triangle_plot(gdsamples, ["ns", "As"], filled=True)
     plt.show()
 
-def power_spec_likelihood(power_spectrum, measured=None, err=5., spectrum_type = 0, lensing=False, plot=True):
+def power_spec_likelihood(power_spectrum, measured=None, err=5., spectrum_type = 0, lensing=False, plot=False):
     '''
     Given a power spectrum in P(k), a power spectrum in Cl, and error bars, 
     calculates the likelihood of the theory using Gaussian spread
@@ -598,7 +598,7 @@ def spline_driver(output, spectrum_type):
     global_var['transfer'] = transfer 
     # test to make sure the likelihood function works
     print(mcmc_spline_runner(spectrum_type=spectrum_type, p0=-28, p1=-25,k0=-5.2, k1=-0.3, err=0.01))#, p2=0.5, # k2=-0.3, ))
-    info_dict = get_spline_infodict(output, spectrum_type)
+    info_dict = yaml_load(output)#get_spline_infodict(output, spectrum_type)
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
@@ -657,48 +657,48 @@ def get_spline_infodict(output, spectrum_type):
     info["params"] = {
         "k0": -5.2,
         "k1": -0.3,
-        #"k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
+        "k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
         #"k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
-        "p0": {"prior": {"min": -30, "max": -20}, "ref": -25, "proposal": 0.01},
-        "p1": {"prior": {"min": -30, "max": -20}, "ref": -25, "proposal": 0.01},
-        #"p2": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
+        "p0": {"prior": {"min": 0, "max": 5}, "ref": 2.99, "proposal": 0.01},
+        "p1": {"prior": {"min": 0, "max": 5}, "ref": 2.99, "proposal": 0.01},
+        "p2": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
         #"p3": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
         'spectrum_type': spectrum_type,
-        'err': 0.01
+        #'err': 0.01
     }
 
-    info["sampler"] = {"mcmc": {"Rminus1_stop": 0.1, "max_tries": 1000}}
+    info["sampler"] = {"mcmc": {"Rminus1_stop": 1, "max_tries": 1000}}
     info["output"] = output
+    info["resume"] = True
     return info
 
 def main():
-    file_root = 'lensing/lensing_test2'
+    file_root = 'out3_tt/3knots_tt'
     spectrum_type = 0
     transfer, total_powers = get_default_instance(lmax=2000, accuracy=1, lsample=50, spectrum_type=0)
     global_var['measured_power'] = total_powers
     global_var['transfer'] = transfer 
 
-    info_dict = get_infodict(file_root, spectrum_type)
-    #variables, priors = get_priors_and_variables(2)
+    info_dict = get_spline_infodict(file_root, spectrum_type)
+    variables, priors = get_priors_and_variables(2)
     #print(cosmos_likelihood(ns=7.611533, As=2.826542e-12, err=100))
-    print(cosmos_likelihood(ns=0.955, As=1.93e-9, err=100, lensing=True))
-    updated_info, sampler = run(info_dict, resume=True)
-    variables=('ns','As')
-    #updated_info, sampler = spline_driver(file_root, spectrum_type=2)
+    #print(cosmos_likelihood(ns=0.955, As=1.93e-9, err=100, lensing=True))
+    #updated_info, sampler = run(info_dict, resume=True)
+    #variables=('ns','As')
+    updated_info, sampler = spline_driver(file_root, spectrum_type=spectrum_type)
     plot_info(updated_info, sampler, variables)
     
-    '''
+    
     print(variables)
     print(priors)
     fgivenx_contours_logp(priors, variables, file_root)
-    '''
 
-if __name__ == '__main__':
+def main2():
     lmax = 2000
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-    ns = 0.8
-    As = 1.24e-9
+    ns = 0.96
+    As = 2e-9
     kp=1/20
     pars.InitPower.set_params(ns=ns, As=As)
     #pars.WantTensors=False
@@ -713,10 +713,10 @@ if __name__ == '__main__':
     print('getting transfer mat')
     transfer = data.get_cmb_transfer_data()
     ks = transfer.q
-    pk = [As*(k/kp)**(ns-1) for k in ks]
+    total_powers_T = powers['lensed_scalar'][:,0]
     pk = pars.scalar_power(ks)
     norm_pk = [pk[i]/ks[i] for i in range(len(ks))]
-    spectrum_type=1
+    spectrum_type=0
     if(spectrum_type < 3):
         trans_squared = np.square(transfer.delta_p_l_k[spectrum_type])
    
@@ -730,10 +730,10 @@ if __name__ == '__main__':
         
         integral = trans_squared.dot(norm_pk)
         p=2
-
+    
     cl = np.array([integral[i] * ((i) * (i+1))**p
                     for i in range(len(integral))])
-    plt.plot(cl*2e9, label = 'transfered')
+    
     
     ind = spectrum_type
     total_powers_T = powers['lensed_scalar'][:,ind]
@@ -741,9 +741,13 @@ if __name__ == '__main__':
     #plt.plot((powers['unlensed_total'][:,ind]-powers['unlensed_scalar'][:,ind])[1:], label='total')
     
 
-    plt.plot(powers['total'][:,ind], label='total')
-    plt.plot(powers['unlensed_scalar'][:,ind], label='unlensed_scalar')
-    plt.plot(powers['unlensed_total'][:,ind], label='unlensed_total')
+    plt.errorbar(range(len(powers['total'][:,ind])),powers['total'][:,ind], yerr = 100, label='Mock Data with Error Bars')
+    plt.plot(transfer.L, cl*2e9, label = 'Computed from Transfer Function', linewidth=3)
+    plt.xlabel('Multipole')
+    plt.ylabel('l(l+1)C^TT')
+    plt.title('Fitting Power Spectrum to Raw Data')
+    #plt.plot(powers['unlensed_scalar'][:,ind], label='unlensed_scalar')
+    #plt.plot(powers['unlensed_total'][:,ind], label='unlensed_total')
     #plt.plot(powers['lensed_scalar'][:,ind], label='lensed_scalar')
     #plt.plot(powers['tensor'][:,ind], label='tensor')
     #plt.plot(powers['lens_potential'][:,ind], label='lens_potential')
@@ -753,8 +757,32 @@ if __name__ == '__main__':
     plt.semilogy(powers['unlensed_scalar'][0:1999,ind]/cl/2e9, label='ratio between unlensed')
     plt.semilogy(powers['lensed_scalar'][0:1999,ind]/cl/2e9, label = 'ratio between lensed')
     plt.plot([0, 1999],[1,1], label = 'y=1')
+    plt.xlabel('Multipole (l)')
+    plt.ylabel('Power Cl')
     plt.legend()
     plt.show()
-    #main()
+    
 
+'''
 
+    plt.xlabel('Multiple l')
+    plt.ylabel('Anisotropy Cl (uK^2)')
+    plt.title("CMB Power Spectrum with different parameters")
+    plt.legend()
+    plt.show()
+'''
+
+'''
+plt.figure(figsize=(6,6))
+    plt.imshow(np.clip(trans_squared,1e-30, 1e-16),norm=matplotlib.colors.LogNorm())
+    plt.xticks([0, 2000],[np.format_float_scientific(ks[0], 2),np.format_float_scientific(ks[2000], 2)])
+    plt.xlabel('Wavenumber kMpc')
+    plt.ylabel('Multipole l')
+    plt.title('Transfer Function Squared')
+    cbar = plt.colorbar()
+    cbar.set_label('Transfer Function Value')
+    plt.show()
+
+'''
+if __name__ == '__main__':
+    main()
