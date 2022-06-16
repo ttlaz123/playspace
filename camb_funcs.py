@@ -13,6 +13,7 @@ import argparse
 #This file is then in the docs folders
 camb_path = os.path.realpath(os.path.join(os.getcwd(),'..'))
 sys.path.insert(0,camb_path)
+from astropy.io import fits
 import camb
 from camb import model, initialpower, correlations
 print('Using CAMB %s installed at %s'%(camb.__version__,os.path.dirname(camb.__file__)))
@@ -109,7 +110,7 @@ def get_cls_from_pk(ns, As):
     args = (ns, As)
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-    lmax=2000
+    lmax=global_var['ls'][-1]
     pars.set_for_lmax(lmax,lens_potential_accuracy=1)
     pars.set_initial_power_function(power_k, args=args, 
                                     effective_ns_for_nonlinear=0.96)
@@ -124,7 +125,7 @@ def get_cls_from_spline(logks_list, logps_list):
     args = (logks_list, logps_list)
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-    lmax=2000
+    lmax=global_var['ls'][-1]
     pars.set_for_lmax(lmax,lens_potential_accuracy=1)
     pars.set_initial_power_function(construct_spline, args=args, 
                                     effective_ns_for_nonlinear=0.96)
@@ -198,9 +199,17 @@ def mcmc_spline_runner(spectrum_type, k0, p0,
         logks_list.append(k6)
 
     cl = get_cls_from_spline(logks_list, logps_list)
+    ls = global_var['ls']
+    if('errs' in global_var):
+        errs = global_var['errs']
+    
     cl = cl[:, int(spectrum_type)]
     
     measured = global_var['measured']
+    if(len(ls) < len(cl)):
+        cl = cl[ls]
+    else:
+        measured = measured[:len(cl)]
     log_likelihood = likelihood_vector(measured, err, cl)
     
     if(plot):
@@ -208,8 +217,9 @@ def mcmc_spline_runner(spectrum_type, k0, p0,
         plt.title('lensed_scalar')
         plt.xlabel('Multipole (l)')
         plt.ylabel('Power spectrum (Cl)')
+        plt.plot(measured, label='Data (Planck 2018)')
         plt.plot(cl, label='Transfered')
-        plt.plot(measured, label='Data')
+        
         plt.legend()
         plt.show()
         print("Log likelihood: " + str(log_likelihood))
@@ -229,8 +239,8 @@ def get_spline_infodict(output, spectrum_type):
         "k1": 2,
         #"k1": {"prior": {"min": -5.2, "max": -0.3}, "ref": -3, "proposal": 0.01},
         #"k2": {"prior": {"min": -5.2, "max": -0.3}, "ref": -2, "proposal": 0.01},
-        "p0": {"prior": {"min": -30, "max": -19}, "ref": -25, "proposal": 0.01},
-        "p1": {"prior": {"min": -30, "max": -19}, "ref": -25, "proposal": 0.01},
+        "p0": {"prior": {"min": -30, "max": -19}, "ref": -19.5, "proposal": 0.01},
+        "p1": {"prior": {"min": -30, "max": -19}, "ref": -20.3, "proposal": 0.01},
         #"p2": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
         #"p3": {"prior": {"min": 0, "max": 5}, "ref": 0.5, "proposal": 0.01},
         'spectrum_type': spectrum_type,
@@ -242,19 +252,86 @@ def get_spline_infodict(output, spectrum_type):
     info["output"] = output
     return info
 
-def spline_driver(output, spectrum_type):
+def read_planck(filepath, spectrum_type):
     '''
-    spectrum_type: 0=TT, 1=EE, 2=BB, 3=TE
+    Returns the power spectrum as a function of l
+
+    spectrum type 0 = TT, 1 = EE, 2 = BB, 3 = TE
+
+    0: some weird image thing
+    1: TT low l
+    2: TE low l
+    3: EE low l
+    4: TB low l
+    5: EB low l
+    6: BB low l
+    7: TT high l, binned
+    8: TT high l, unbinned
+    9: TE high l, binned
+    10: TE high l, unbinned
+    11: EE high l, binned
+    12: EE high l, unbinned
+    '''
+    spectrum_data = fits.open(filepath)
+
+    if(spectrum_type == 0):
+        lowind = 1
+        highind = 8
+    elif(spectrum_type == 1):
+        lowind = 3
+        highind = 12
+    elif(spectrum_type == 2):
+        raise AttributeError('No data available for spectrum type ' + str(spectrum_type))
+    elif(spectrum_type == 3):
+        lowind = 2
+        highind = 10
+    else:
+        raise AttributeError('No data available for spectrum type ' + str(spectrum_type))
+
+
+    lowls = spectrum_data[lowind].data['ELL']
+    lowdls = spectrum_data[lowind].data['D_ELL']
+    #TODO have errs be more than just the average
+    lowerrs = (spectrum_data[lowind].data['ERRUP'] + spectrum_data[lowind].data['ERRDOWN']) / 2
+
+    hils = spectrum_data[highind].data['ELL']
+    hidls = spectrum_data[highind].data['D_ELL']
+    hierrs = spectrum_data[highind].data['ERR'] 
+
+    ls = np.concatenate((lowls, hils))
+    dls = np.concatenate((lowdls, hidls))
+    errs = np.concatenate((lowerrs, hierrs))
+    return ls, dls, errs
+    
+def load_data(spectrum_type, datafile=None):
+    '''
+    sets the global variable with the data to fit
     '''
     pars = camb.CAMBparams()
     pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
     results = camb.get_results(pars)
     global_var['results'] = results
-    powers = results.get_lensed_scalar_cls(CMB_unit='muK')
-    global_var['measured'] = powers[:, spectrum_type]
-    # test to make sure the likelihood function works
+
+    if(datafile is None):
+        powers = results.get_lensed_scalar_cls(CMB_unit='muK')
+        global_var['measured'] = powers[:, spectrum_type]
+        global_var['ls'] = range(len(powers[:, spectrum_type]))
+    else:
+        ls, dls, errs = read_planck(datafile, spectrum_type)
+        global_var['measured'] =  dls 
+        global_var['ls'] = ls 
+        global_var['errs'] = errs
+
+def spline_driver(output, spectrum_type,datafile=None):
+    '''
+    spectrum_type: 0=TT, 1=EE, 2=BB, 3=TE
+    '''
     info_dict = get_spline_infodict(output, spectrum_type)
     init_params = info_dict['params']
+
+    load_data(spectrum_type,datafile)
+
+    # test to make sure the likelihood function works   
     log_test = mcmc_spline_runner(spectrum_type=init_params['spectrum_type'], 
                                 p0=init_params['p0']['ref'], 
                                 p1=init_params['p1']['ref'],
@@ -480,12 +557,16 @@ params:
 
 def main():
     print('Executing main')
-    output='camb_test/test1'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--datapath', default=None, help='path/to/datafile')
+    args = parser.parse_args()
+
+    output='camb_test/test2'
     spectrum_type=0
     num_knots = 2
     variables, priors = get_priors_and_variables(num_knots)
-    updated_info, sampler = spline_driver(output, spectrum_type)
-    plot_info(variables, updated_info, sampler)
+    updated_info, sampler = spline_driver(output, spectrum_type, datafile=args.datapath)
+    plot_info(updated_info, sampler, variables)
     print(variables)
     print(priors)
     fgivenx_contours_logp(priors, variables, output)
@@ -521,8 +602,10 @@ def main4(args):
     if(args.yaml_file):
         info_dict = yaml_load(args.yaml_file)
     else:
-        info_dict = None 
-    info_dict['output'] = 'chains/mcmc_ptest'
+        info_dict = get_spline_infodict('chains/mcmc_ptest', 0) 
+    info_dict['output'] = 'chains/mcmc_ptest1'
+    print('loaded yaml')
+    print(info_dict)
     updated_info, sampler = run(info_dict, resume=True)
     return updated_info, sampler
 
