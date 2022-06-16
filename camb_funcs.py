@@ -16,10 +16,11 @@ sys.path.insert(0,camb_path)
 import camb
 from camb import model, initialpower, correlations
 print('Using CAMB %s installed at %s'%(camb.__version__,os.path.dirname(camb.__file__)))
-
+'''
 from cobaya.run import run
 from cobaya.model import get_model
 from cobaya.yaml import yaml_load
+'''
 from getdist.mcsamples import MCSamplesFromCobaya
 from getdist.mcsamples import loadMCSamples
 import getdist.plots as gdplt

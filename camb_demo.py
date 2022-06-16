@@ -8,7 +8,7 @@ import time
 import pickle 
 
 
-from cobaya.run import run
+#from cobaya.run import run
 from getdist.mcsamples import MCSamplesFromCobaya
 import getdist.plots as gdplt
 
@@ -276,7 +276,7 @@ def get_default_instance(lmax, accuracy, lsample, spectrum_type='TT'):
         raise AttributeError('Spectrum type not correct: ' + str(spectrum_type))
 
     total_powers_T = powers['lensed_scalar'][:,ind]
-    print('Used multipoles: ' + str(transfer.L))
+    #print('Used multipoles: ' + str(transfer.L))
     print('Dimensions of Cl: ' + str(total_powers_T.shape))
 
     return transfer, total_powers_T 
