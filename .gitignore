@@ -1,5 +1,5 @@
 ## Cobaya output files
-*.txt
+
 *.yaml
 *.dill_pickle
 *.progress

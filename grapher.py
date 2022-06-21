@@ -1,15 +1,18 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import style
+import numpy as np 
 
 import time
 import random
 import datetime as dt
+import pyvisa 
 import matplotlib.dates as md
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
-
+global_dict={'stop':False}
 def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     '''
     Assumes file is csv
@@ -54,12 +57,13 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     ax.set_title('Some title')
     ax.legend()
 
-def plot_file_live(filename, refresh=200, debug=False, max_points = 50, figsize=(6,6)):
+def plot_file_live(filename, refresh=200, debug=False, figsize=(6,6)):
     '''
     Assumes file is comma separated with header
 
     '''
     print('Plotting data')
+    shown_points = 100
     fig, ax = plt.subplots(1,1, figsize=figsize)
     with open(filename, 'r') as file_obj:
         header_line = file_obj.readline().strip()
@@ -67,7 +71,7 @@ def plot_file_live(filename, refresh=200, debug=False, max_points = 50, figsize=
         data_list = []
         for i in range(len(headers)):
             data_list.append([])
-        ani = animation.FuncAnimation(fig, animate, fargs=(data_list, file_obj, headers, ax, max_points, debug), interval=refresh)
+        ani = animation.FuncAnimation(fig, animate, fargs=(data_list, file_obj, headers, ax, shown_points, debug), interval=refresh)
         plt.show()
     print('Done plotting')
     
@@ -79,16 +83,44 @@ def write_headers(filename, headers):
         f.write(','.join(headers) + '\n')
     print('Done writing headers: ' + str(headers))
 
+def read_data_stream(device, filename, headers, channels, commands, refresh, readtime):
+    '''
+    read data from device and append to filename
+    only write channels given with given commands
+    refresh in milliseconds
+    readtime in seconds
+    '''
+    print('Reading data from ' + str(device) + ' to ' + str(filename))
+    max_points = int(readtime*1000/refresh)
+    write_headers(filename, headers)
+    with open(filename, 'a') as f:
+        for i in range(max_points):
+            if(global_dict['stop']):
+                print('Stopping data reading at input: ' + str(i))
+                break
+            time.sleep(refresh/1000)
+            time1 = time.time()
+            data = [str(time1)]
+            for command in commands:
+                res = device.query(command).split(',')
+                res = np.array(res)[channels]
+                data.extend(res)
+            f.write(','.join(data) + '\n')
+            f.flush()
 
-def generate_rand_data(filename, headers, data_range, refresh = 100):
+def generate_rand_data(filename, headers, data_range, readtime, refresh = 100):
     '''
     assumes first entry is timestamps
     '''
     print('Generating data')
-    max_gen = 1000
+    max_gen = int(readtime*1000/refresh)
+    write_headers(filename, headers)
     with open(filename, 'a') as f:
         
         for i in range((max_gen)):
+            if(global_dict['stop']):
+                print('Stopping data reading at input: ' + str(i))
+                break
             time.sleep(refresh/1000)
             time1 = time.time()
             data = [str(time1)]
@@ -100,28 +132,59 @@ def generate_rand_data(filename, headers, data_range, refresh = 100):
     print('Done generating data')
 
 
+def get_gpb_device(device_name = 'LSCI'):
+    '''
+    opens the first devie that has device name
+    '''
+    rm = pyvisa.ResourceManager()
+    rlist = rm.list_resources()
+    for r in rlist:
+        dev = rm.open_resource(r)
+        try:
+            dev_name = dev.query('IDN?')
+        
+        except pyvisa.errors.VisaIOError:
+            print('Device timeout: ' + str(r))
+            continue
+        if(dev_name.split(',')[0] == device_name):
+            return dev
+
+def read_temperature_data(filename, refresh, channels, commands, headers,readtime, rand=False, data_range=[0,1], debug=False):
+    '''
+    '''
+    
+    
+    if(rand):
+        rand_data_thread = threading.Thread(target=generate_rand_data, args=[filename, headers, data_range, readtime, refresh]) 
+        rand_data_thread.start()
+    else:
+        device = get_gpb_device()
+        if(device is None):
+            print('Could not find device')
+            return
+        read_data_thread = threading.Thread(target=read_data_stream, args=[ device, filename, headers, channels, commands, refresh, readtime])
+        read_data_thread.start()
+    plot_file_live(filename, refresh=refresh, debug=debug)
+    print('Press any key to stop script')
+    x=input()
+    if(x):
+        global_dict['stop'] = True 
+
 def main():
     filename = 'example.txt'
     
-    refresh1 = 50
-    refresh2 = 50
+    refresh = 500
     debug = False
-    headers = ['timestamp', 'v1', 'v2', 'v3']
+    channels = [0, 2]
+    headers = ['t'+str(c) for c in channels]
+    headers2 = ['v'+str(c) for c in channels]
+    headers.insert(0, 'timestamp')
+    headers.extend(headers2)
+    commands = ['CRDG?', 'SRDG?']
+    readtime = 1000
     data_range=[0,10]
-    max_points = 50
-    write_headers(filename, headers)
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        executor.submit(plot_file_live, filename, refresh=refresh2, max_points = max_points, debug=debug)
-        executor.submit(generate_rand_data, filename, headers, data_range, refresh=refresh1)
-        
-    '''
-    
-    print('Generating Data')
-    generate_rand_data(filename, headers, data_range, refresh=refresh1)
-    print('Plotting data')
-    plot_file_live(filename, refresh=refresh2, max_points = max_points, debug=debug)
-    
-    '''
+    max_points = 100
+    read_temperature_data(filename, refresh, channels, commands, headers,readtime, rand=False)
 
 if __name__== '__main__':
     main()
