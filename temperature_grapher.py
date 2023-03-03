@@ -202,7 +202,7 @@ def read_temperature_data(filename, refresh, channels, commands, headers,readtim
         global_dict['stop'] = True 
 
 def main():
-    filename = 'example.txt'
+    filename = 'electric_run1_test.txt'
     
     refresh = 500
     debug = False
@@ -218,7 +218,7 @@ def main():
     read_temperature_data(filename, refresh, channels, commands, headers,readtime, rand=False)
 
 if __name__== '__main__':
-    filename = '20220621_diode470cal.txt'
-    refresh = 1
-    plot_file_all(filename)
-    #main()
+    #filename = '20220621_diode470cal.txt'
+    #refresh = 1
+    #plot_file_all(filename)
+    main()
