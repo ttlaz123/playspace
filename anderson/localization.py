@@ -33,7 +33,7 @@ def generate_function(system_size, function='linear', params=None):
             params['c']*np.power(x-midpoint, 3) 
                     for x in range((system_size))]
         funcstr = ('y=' + str(params['a']) +'x' +'+' +str(params['b']) +'x^2'+
-                              + str(params['c']) + 'x^3')
+                               str(params['c']) + 'x^3')
     elif(function == 'quartic'):
         y = [params['a']*(x-midpoint) + 
              params['b']*np.power(x-midpoint, 2) + 
@@ -41,7 +41,7 @@ def generate_function(system_size, function='linear', params=None):
              params['d']*np.power(x-midpoint, 4)
               for x in range((system_size))]
         funcstr = ('y=' + str(params['a']) +'x' +'+' +str(params['b']) +'x^2'+
-                              + str(params['c']) + 'x^3' + + str(params['d']) + 'x^4')
+                               str(params['c']) + 'x^3' + + str(params['d']) + 'x^4')
     elif(function == 'sine'):
         y = [params['a']*np.sin(params['b']*(x-midpoint)) 
              for x in range((system_size))]
@@ -117,14 +117,17 @@ def conj_squared(psi):
 
 def animate_evolution(psis1, psis2, ts, title, func, xlim=None, ylim=None):
     midpoint = len(psis1[0])/2
+    tolerance= 1e-18
     fig, ax = plt.subplots()
     x = np.arange(len(psis1[0]))
+    
     line1, = ax.plot(x-midpoint, conj_squared_fast(psis1[0]), linewidth=3, label='psi1')
     line2, = ax.plot(x-midpoint, conj_squared_fast(psis2[0]), label='psi2')
     text = ax.text(0.2, 0.8,  't=' + str(ts[0]), transform=ax.transAxes)
     
-    pos_dict = {'max_pos': np.max(np.nonzero(psis1[0])) - midpoint,
-                'min_pos' : np.min(np.nonzero(psis1[0])) - midpoint}
+    psis1_abs = conj_squared_fast(psis1[0])
+    pos_dict = {'max_pos': np.max(np.where(psis1_abs>tolerance)) - midpoint,
+                'min_pos' :np.min(np.where(psis1_abs>tolerance)) - midpoint}
     
     max_pos = pos_dict['max_pos']
     min_pos = pos_dict['min_pos']
@@ -136,9 +139,11 @@ def animate_evolution(psis1, psis2, ts, title, func, xlim=None, ylim=None):
     text_minval = ax.text(0.1, 0.65,  'minval=' + str(pos_dict['min_posval']), transform=ax.transAxes)
     text_max = ax.text(0.1, 0.6,  'maxpos=' + str(max_pos), transform=ax.transAxes)
     text_maxval = ax.text(0.1, 0.55,  'maxval=' + str(pos_dict['max_posval']), transform=ax.transAxes)
+  
     def animate(i):
-        new_max_pos = np.max(np.nonzero(psis1[i])) - midpoint
-        new_min_pos = np.min(np.nonzero(psis1[i])) - midpoint
+        psis1_abs = conj_squared_fast(psis1[i])
+        new_max_pos = np.max(np.where(psis1_abs>tolerance)) - midpoint
+        new_min_pos = np.min(np.where(psis1_abs>tolerance)) - midpoint
         # for some reason dictionaries are necessary here
         if(new_max_pos > pos_dict['max_pos']):
             pos_dict['max_pos'] = new_max_pos
@@ -148,7 +153,7 @@ def animate_evolution(psis1, psis2, ts, title, func, xlim=None, ylim=None):
             pos_dict['min_posval'] = func[int(pos_dict['min_pos']+midpoint)]
         max_line.set_xdata([pos_dict['max_pos'], pos_dict['max_pos']])
         min_line.set_xdata([pos_dict['min_pos'], pos_dict['min_pos']])
-        line1.set_ydata(conj_squared_fast(psis1[i]))
+        line1.set_ydata(psis1_abs)
         line2.set_ydata(conj_squared_fast(psis2[i]))
         text.set_text('t=' +str(ts[i]))
         text_min.set_text('minpos=' + str(pos_dict['min_pos']))
@@ -208,16 +213,16 @@ def run_localization_test(system_size, function, hopping_strength, psi0,  max_t,
 def main():
     system_size = 1000
     
-    function = 'step'
-    params1 = {'a': 50, 'b':0.001, 'c':1, 'd': 1}
-    hopping_strength=1
-    max_t = 600
+    function = 'cubic'
+    params1 = {'a': 0, 'b':0.000, 'c':0.0001, 'd': 1}
+    hopping_strength=-1
+    max_t = 100
     xlim = [-system_size/2, system_size/2]
     #xlim = [150, 250]
     ylim = [0, 1]
     params2 = {'a': -1, 'b':-0.1, 'c':1, 'd': 1}
     psi0 = np.zeros(system_size)
-    psi0[700] = 1#/np.sqrt(2)
+    psi0[500] = 1#/np.sqrt(2)
     #psi0[200] = 1/np.sqrt(2)
     run_localization_test(system_size, function, hopping_strength, psi0, max_t,
                           params1, params2,
