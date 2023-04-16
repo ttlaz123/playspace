@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import style
 import numpy as np 
+import pandas as pd
 
 import time
 import random
@@ -19,6 +20,8 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     first col is x axis
     all other cols are y axis
     '''
+    top = 50
+    bot = -220
     line = file_obj.readline()
     if(debug):
         print(str(i) + ' line: ' + line)
@@ -46,6 +49,7 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
         dates=[dt.datetime.fromtimestamp(ts) for ts in data_list[0]]
         datenums = md.date2num(dates)
         ax.plot(datenums, data_list[x], label=headers[x])
+    ax.set_ylim([-220, 100])
     #print('past plotting')
     xfmt = md.DateFormatter('%Y-%m-%d %H:%M:%S')
     #print('done formattign')
@@ -53,9 +57,36 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     #print('done setting')
     ax.tick_params(labelrotation=15)
     ax.set_xlabel(headers[0])
-    ax.set_ylabel('Value')
+    ax.set_ylabel('Temperature (degrees Celcius)')
     ax.set_title('Some title')
     ax.legend()
+
+def plot_file_all(filename):
+    '''
+    '''
+
+    df = pd.read_csv(filename)
+    
+    timestamps = df['Timestamp'].tolist()
+    dates=[dt.datetime.fromtimestamp(ts) for ts in timestamps]
+    datenums = md.date2num(dates)
+    d1 = df['Diode 1'].tolist()
+    d2 = df['Didoe 2'].tolist()
+
+    fig, ax = plt.subplots(1)
+    xfmt = md.DateFormatter('%Y-%m-%d %H:%M:%S')
+    ax.set_xlabel('Time Stamp')
+    ax.set_ylabel('Thermometer Temperature (degrees Celcius)')
+    ax.set_title('Temperature Diode Liquid Nitrogen Check')
+    ax.plot(datenums, d1, label='Diode Channel 1') 
+    ax.plot(datenums, d2, label='Diode Channel 2') 
+    ax.xaxis.set_major_formatter(xfmt)
+    ax.tick_params(labelrotation=15)
+    ax.set_ylim([-200, 100])
+
+    ax.legend()
+    plt.show()
+
 
 def plot_file_live(filename, refresh=200, debug=False, figsize=(6,6)):
     '''
@@ -63,7 +94,7 @@ def plot_file_live(filename, refresh=200, debug=False, figsize=(6,6)):
 
     '''
     print('Plotting data')
-    shown_points = 100
+    shown_points = 10000
     fig, ax = plt.subplots(1,1, figsize=figsize)
     with open(filename, 'r') as file_obj:
         header_line = file_obj.readline().strip()
@@ -187,4 +218,7 @@ def main():
     read_temperature_data(filename, refresh, channels, commands, headers,readtime, rand=False)
 
 if __name__== '__main__':
-    main()
+    filename = '20220621_diode470cal.txt'
+    refresh = 1
+    plot_file_all(filename)
+    #main()
