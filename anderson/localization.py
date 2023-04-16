@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.linalg import expm
 import matplotlib.animation as animation
 import scipy.sparse as sparse
+import time
 
 def generate_laplacian(system_size, hopping_strength=1):
     '''
@@ -56,20 +57,20 @@ def generate_function(system_size, function='linear', params=None):
        y = params['a']*np.heaviside(np.arange(system_size)-system_size/2, 0)-params['a']/2
        funcstr = 'y=-'+str(params['a']/2)+ '(x<0),'+str(params['a']/2)+ '(x>0)'
     H = np.diag(y)
-    return H, funcstr
+    return H, funcstr, y
 
 def generate_hamiltonian(system_size, function, params, hopping_strength=1):
     H1 = generate_laplacian(system_size, hopping_strength=hopping_strength)
     
-    H0, funcstr = generate_function(system_size, function, params=params)
-    return H1+H0, funcstr
+    H0, funcstr, func = generate_function(system_size, function, params=params)
+    return H1+H0, funcstr, func
 
 def generate_hamiltonian_pair(system_size, function, params, hopping_strength=1):
     H1 = generate_laplacian(system_size, hopping_strength=hopping_strength)
     
-    H0, funcstr = generate_function(system_size, function, params=params)
+    H0, funcstr, func = generate_function(system_size, function, params=params)
     funcstr2 = '-' + funcstr
-    return H1+H0, H1-H0, funcstr, funcstr2
+    return func, H1+H0, H1-H0, funcstr, funcstr2
 
 def time_evolve(H, psi0, ts):
     psis = []
@@ -109,25 +110,57 @@ def time_evolve_fast(evecs, evals, state, ts):
 def get_eigenvectors(H):
     return np.linalg.eig(H)
 
+def conj_squared_fast(psi):
+    return np.real(np.conj(psi)*psi)
 def conj_squared(psi):
     return np.abs(psi)**2
 
-def animate_evolution(psis1, psis2, ts, title, xlim=None, ylim=None):
+def animate_evolution(psis1, psis2, ts, title, func, xlim=None, ylim=None):
     midpoint = len(psis1[0])/2
     fig, ax = plt.subplots()
     x = np.arange(len(psis1[0]))
-    line1, = ax.plot(x-midpoint, conj_squared(psis1[0]), linewidth=3, label='psi1')
-    line2, = ax.plot(x-midpoint, conj_squared(psis2[0]), label='psi2')
-    text = ax.text(0.8, 0.8,  't=' + str(ts[0]), transform=ax.transAxes)
+    line1, = ax.plot(x-midpoint, conj_squared_fast(psis1[0]), linewidth=3, label='psi1')
+    line2, = ax.plot(x-midpoint, conj_squared_fast(psis2[0]), label='psi2')
+    text = ax.text(0.2, 0.8,  't=' + str(ts[0]), transform=ax.transAxes)
+    
+    pos_dict = {'max_pos': np.max(np.nonzero(psis1[0])) - midpoint,
+                'min_pos' : np.min(np.nonzero(psis1[0])) - midpoint}
+    
+    max_pos = pos_dict['max_pos']
+    min_pos = pos_dict['min_pos']
+    pos_dict['min_posval'] = func[int(min_pos+midpoint)]
+    pos_dict['max_posval'] = func[int(max_pos+midpoint)]
+    max_line, = ax.plot([max_pos, max_pos], [0,1], linewidth=3, label='Max Pos')
+    min_line, = ax.plot([min_pos, min_pos], [0,1], linewidth=3, label='Min Pos')
+    text_min = ax.text(0.1, 0.7,  'minpos=' + str(min_pos), transform=ax.transAxes)
+    text_minval = ax.text(0.1, 0.65,  'minval=' + str(pos_dict['min_posval']), transform=ax.transAxes)
+    text_max = ax.text(0.1, 0.6,  'maxpos=' + str(max_pos), transform=ax.transAxes)
+    text_maxval = ax.text(0.1, 0.55,  'maxval=' + str(pos_dict['max_posval']), transform=ax.transAxes)
     def animate(i):
-        line1.set_ydata(conj_squared(psis1[i]))
-        line2.set_ydata(conj_squared(psis2[i]))
+        new_max_pos = np.max(np.nonzero(psis1[i])) - midpoint
+        new_min_pos = np.min(np.nonzero(psis1[i])) - midpoint
+        # for some reason dictionaries are necessary here
+        if(new_max_pos > pos_dict['max_pos']):
+            pos_dict['max_pos'] = new_max_pos
+            pos_dict['max_posval'] = func[int(pos_dict['max_pos']+midpoint)]
+        if(new_min_pos < pos_dict['min_pos']):
+            pos_dict['min_pos'] = new_min_pos
+            pos_dict['min_posval'] = func[int(pos_dict['min_pos']+midpoint)]
+        max_line.set_xdata([pos_dict['max_pos'], pos_dict['max_pos']])
+        min_line.set_xdata([pos_dict['min_pos'], pos_dict['min_pos']])
+        line1.set_ydata(conj_squared_fast(psis1[i]))
+        line2.set_ydata(conj_squared_fast(psis2[i]))
         text.set_text('t=' +str(ts[i]))
-        return line1, line2
+        text_min.set_text('minpos=' + str(pos_dict['min_pos']))
+        text_max.set_text('maxpos=' + str(pos_dict['max_pos']))
+        text_minval.set_text('minposval=' + str(pos_dict['min_posval']))
+        text_maxval.set_text('maxposval=' + str(pos_dict['max_posval']))
+        return line1, line2, max_line, min_line
 
     ani = animation.FuncAnimation(
-        fig, animate#, interval=20, blit=True, save_count=50
+        fig, animate, frames=len(psis1)#, interval=20, blit=True, save_count=50
     )
+    print('Done Animating')
     if(xlim is not None):
        plt.xlim(xlim)
     if(ylim is not None):
@@ -137,41 +170,55 @@ def animate_evolution(psis1, psis2, ts, title, xlim=None, ylim=None):
     plt.title(title)
     plt.legend()
     print('Saving animation:' + str(title))
+    time1 = time.time()
     writergif = animation.PillowWriter(fps=10)
     ani.save(title + '.gif',writer=writergif)
+    print('Saving done after time (s): ' + str(time1-time.time()))
     plt.show()
 
 def run_localization_test(system_size, function, hopping_strength, psi0,  max_t, params1, params2,
                           xlim=None, ylim=None):
     midpoint = int(system_size/2)
-    H, H2, funcstr, funcstr2 = generate_hamiltonian_pair(system_size, function, params1, 
+    func, H, H2, funcstr, funcstr2 = generate_hamiltonian_pair(system_size, function, params1, 
                                       hopping_strength=hopping_strength)
-    print('Finding eigenvectors of ' + str(H))
+    time1 = time.time()
+    print('Finding eigenvectors of :')
+    print(str(H))
     evals, evecs = get_eigenvectors(H)
     evals2, evecs2 = get_eigenvectors(H2)
+    time2 = time.time()
+    print('Done after time(s): ' + str(time2-time1))
     
-    ts = np.array(range(max_t))
     print('__________Time Evolving____________')
+    time3 = time.time()
+    ts = np.array(range(max_t))
     psis1 = time_evolve_fast(evecs, evals, psi0, ts)
-    print('Done ' + funcstr)
+    time4 = time.time()
+    print('Done ' + funcstr + ' after time (s):' + str(time4-time3))
     psis2 = time_evolve_fast(evecs2, evals2, psi0, ts)
-    print('Done ' + funcstr2)
+    time5 = time.time()
+    print('Done ' + funcstr2 + ' after time (s):' + str(time5-time4))
+
+    energy = np.conjugate(psis1[0]) @ H @ psis1[0]
+    print('Energy:' + str(energy))
     title = funcstr + '_and_' + funcstr2+'_hoppingstrength='+str(hopping_strength)
 
-    animate_evolution(psis1, psis2, ts, title, xlim, ylim)
+    animate_evolution(psis1, psis2, ts, title, func, xlim, ylim)
                       
 def main():
     system_size = 1000
     
     function = 'step'
-    params1 = {'a': 10, 'b':0.1, 'c':1, 'd': 1}
-    hopping_strength=5
-    max_t = 200
+    params1 = {'a': 50, 'b':0.001, 'c':1, 'd': 1}
+    hopping_strength=1
+    max_t = 600
     xlim = [-system_size/2, system_size/2]
-    ylim = [0, 0.1]
+    #xlim = [150, 250]
+    ylim = [0, 1]
     params2 = {'a': -1, 'b':-0.1, 'c':1, 'd': 1}
     psi0 = np.zeros(system_size)
-    psi0[700] = 1
+    psi0[700] = 1#/np.sqrt(2)
+    #psi0[200] = 1/np.sqrt(2)
     run_localization_test(system_size, function, hopping_strength, psi0, max_t,
                           params1, params2,
                           xlim=xlim, ylim=ylim)
