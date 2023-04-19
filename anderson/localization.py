@@ -54,9 +54,14 @@ def generate_function(system_size, function='linear', params=None):
         y = 2*params['a']*np.random.rand(system_size)-params['a']
         funcstr = 'y=rand[-' + str(params['a']) +',' + str(params['a']) + ']'
     elif(function == 'step'):
-       y = params['a']*np.heaviside(np.arange(system_size)-system_size/2, 0)-params['a']/2
+       y = params['a']*np.heaviside(np.arange(system_size)-system_size/2, 1)-params['a']/2
+       y[-1] = params['a']/2
        funcstr = 'y=-'+str(params['a']/2)+ '(x<0),'+str(params['a']/2)+ '(x>0)'
+    elif(function == 'flat'):
+       y = np.ones(system_size) * params['a']
+       funcstr = 'y=' + str(params['a'])
     H = np.diag(y)
+    
     return H, funcstr, y
 
 def generate_hamiltonian(system_size, function, params, hopping_strength=1):
@@ -109,6 +114,10 @@ def time_evolve_fast(evecs, evals, state, ts):
 
 def get_eigenvectors(H):
     return np.linalg.eig(H)
+
+def normalize_vector(psi):
+   norm = np.sqrt(np.sum(conj_squared_fast(psi)))
+   return psi/norm
 
 def conj_squared_fast(psi):
     return np.real(np.conj(psi)*psi)
@@ -181,8 +190,68 @@ def animate_evolution(psis1, psis2, ts, title, func, xlim=None, ylim=None):
     print('Saving done after time (s): ' + str(time1-time.time()))
     plt.show()
 
+def plot_evecs(evecs, evals, max_evecs=None, title='some eigenvectors'):
+    if (max_evecs is None):
+      max_evecs = evecs.shape[0]
+    plt.figure()
+    plt.hist(evals, bins=100)
+    plt.show()
+    
+    i = 0
+    while(i < max_evecs):
+        n = i#nt(np.random.rand()*evecs.shape[0])
+        if((evals[n]) < 0):
+            i = i + 1
+            pass
+            continue
+        evec = evecs[n]
+        #print(evec)
+        plt.plot(evec, label='energy: ' + str(evals[n]))
+        i = i + 1
+    plt.title(title)
+    plt.xlabel('Position')
+    plt.legend()
+    plt.show()
+    
+def update_hist(num, data):
+    plt.cla()
+    mi = min(data[num])
+    ma = max(data[num])
+    plt.hist(data[num], bins=100, 
+                    label='a=' + str(num) +', min=' + str(mi) +', max='+str(ma))
+    plt.legend()
+    plt.xlim([-70, 70])
+    plt.ylim([0,30])
+
+def run_eigenvalue_test(system_size, function='step', hopping_strength=10):
+
+    all_evals = []
+    number_of_frames = 100
+    for a in range(number_of_frames):
+        params = {'a':a}
+        H, funcstr, func = generate_hamiltonian(system_size, function, params, hopping_strength=hopping_strength)
+        #H[0,-1] = hopping_strength
+        #H[-1, 0] = hopping_strength
+        print('Finding eigenvectors of :')
+        print(str(H))
+        evals, evecs = get_eigenvectors(H)
+        
+        all_evals.append(evals) 
+    
+    data = all_evals[0]
+    fig = plt.figure()
+    hist = plt.hist(data, bins=100, label=str(0))
+    
+    ani = animation.FuncAnimation(fig, update_hist, number_of_frames, fargs=(all_evals, ) )
+    plt.xlim([-70, 70])
+    plt.ylim([0,30])
+    plt.legend()
+    writergif = animation.PillowWriter(fps=10)
+    ani.save( 'eigenvalues.gif',writer=writergif)
+    plt.show()
+
 def run_localization_test(system_size, function, hopping_strength, psi0,  max_t, params1, params2,
-                          xlim=None, ylim=None):
+                          xlim=None, ylim=None, time_evolve=False):
     midpoint = int(system_size/2)
     func, H, H2, funcstr, funcstr2 = generate_hamiltonian_pair(system_size, function, params1, 
                                       hopping_strength=hopping_strength)
@@ -190,43 +259,57 @@ def run_localization_test(system_size, function, hopping_strength, psi0,  max_t,
     print('Finding eigenvectors of :')
     print(str(H))
     evals, evecs = get_eigenvectors(H)
+    print('Finding eigenvectors of :')
+    print(str(H2))
     evals2, evecs2 = get_eigenvectors(H2)
+    plot_evecs(evecs, evals, max_evecs=10)
+    plot_evecs(evecs2, evals2, max_evecs=10)
     time2 = time.time()
     print('Done after time(s): ' + str(time2-time1))
-    
-    print('__________Time Evolving____________')
-    time3 = time.time()
-    ts = np.array(range(max_t))
-    psis1 = time_evolve_fast(evecs, evals, psi0, ts)
-    time4 = time.time()
-    print('Done ' + funcstr + ' after time (s):' + str(time4-time3))
-    psis2 = time_evolve_fast(evecs2, evals2, psi0, ts)
-    time5 = time.time()
-    print('Done ' + funcstr2 + ' after time (s):' + str(time5-time4))
+    if(time_evolve):
+        print('__________Time Evolving____________')
+        time3 = time.time()
+        ts = np.array(range(max_t))
+        psis1 = time_evolve_fast(evecs, evals, psi0, ts)
+        time4 = time.time()
+        print('Done ' + funcstr + ' after time (s):' + str(time4-time3))
+        psis2 = time_evolve_fast(evecs2, evals2, psi0, ts)
+        time5 = time.time()
+        print('Done ' + funcstr2 + ' after time (s):' + str(time5-time4))
 
-    energy = np.conjugate(psis1[0]) @ H @ psis1[0]
-    print('Energy:' + str(energy))
-    title = funcstr + '_and_' + funcstr2+'_hoppingstrength='+str(hopping_strength)
+        energy = np.conjugate(psis1[0]) @ H @ psis1[0]
+        print('Energy:' + str(energy))
+        title = funcstr + '_and_' + funcstr2+'_hoppingstrength='+str(hopping_strength)
 
-    animate_evolution(psis1, psis2, ts, title, func, xlim, ylim)
-                      
+        animate_evolution(psis1, psis2, ts, title, func, xlim, ylim)
+
+def gaussian(x, mu, sig):
+    return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))             
 def main():
-    system_size = 1000
-    
-    function = 'cubic'
-    params1 = {'a': 0, 'b':0.000, 'c':0.0001, 'd': 1}
-    hopping_strength=-1
+    system_size = 100
+    time_evolve = True
+    function = 'quadratic'
+    params1 = {'a': 00, 'b':1, 'c':0.0001, 'd': 1}
+    hopping_strength=10
     max_t = 100
     xlim = [-system_size/2, system_size/2]
     #xlim = [150, 250]
     ylim = [0, 1]
     params2 = {'a': -1, 'b':-0.1, 'c':1, 'd': 1}
-    psi0 = np.zeros(system_size)
-    psi0[500] = 1#/np.sqrt(2)
-    #psi0[200] = 1/np.sqrt(2)
+    psi0 = np.zeros(system_size, dtype=complex)
+    #psi0[int(system_size*9/10)]=1
+    for i in range((system_size)):
+        psi0[i] = gaussian(i-system_size/2, system_size*9/10-system_size/2, 3)
+    #psi0[40] = 100#/np.sqrt(2)
+    #psi0[44] = 200
+    #psi0[54] = 100
+    psi0 = normalize_vector(psi0)
+    print('Initial vector: ' + str(psi0))
     run_localization_test(system_size, function, hopping_strength, psi0, max_t,
                           params1, params2,
-                          xlim=xlim, ylim=ylim)
+                          xlim=xlim, ylim=ylim, time_evolve=time_evolve)
 if __name__ == '__main__':
-    main()
+
+    run_eigenvalue_test(100, function='step')
+    #main()
 
