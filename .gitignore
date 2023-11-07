@@ -6,6 +6,6 @@
 *.covmat
 *.checkpoint
 *.locked
-
+*.gif
 # folders
 plc_3.0/
