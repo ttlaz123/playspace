@@ -20,8 +20,8 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     first col is x axis
     all other cols are y axis
     '''
-    top = 50
-    bot = -220
+    top = 120
+    bot = 0
     line = file_obj.readline()
     if(debug):
         print(str(i) + ' line: ' + line)
@@ -34,7 +34,7 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
         try:
             assert len(data) == num_cols
             for x in range(num_cols):
-                data_list[x].append(float(data[x]))
+                data_list[x].append(float(data[x])+273.15)
                 if len(data_list[x]) > max_points:
                     data_list[x] = data_list[x][len(data_list[x])-max_points:]
         except AssertionError:
@@ -49,7 +49,7 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
         dates=[dt.datetime.fromtimestamp(ts) for ts in data_list[0]]
         datenums = md.date2num(dates)
         ax.plot(datenums, data_list[x], label=headers[x])
-    ax.set_ylim([-220, 100])
+    ax.set_ylim([bot, top])
     #print('past plotting')
     xfmt = md.DateFormatter('%Y-%m-%d %H:%M:%S')
     #print('done formattign')
@@ -57,8 +57,8 @@ def animate(i, data_list, file_obj, headers, ax, max_points, debug):
     #print('done setting')
     ax.tick_params(labelrotation=15)
     ax.set_xlabel(headers[0])
-    ax.set_ylabel('Temperature (degrees Celcius)')
-    ax.set_title('Some title')
+    ax.set_ylabel('Temperature (Kelvin)')
+    ax.set_title('Pulse Tube Temperature Data')
     ax.legend()
 
 def plot_file_all(filename):
@@ -67,11 +67,12 @@ def plot_file_all(filename):
 
     df = pd.read_csv(filename)
     
-    timestamps = df['Timestamp'].tolist()
+    timestamps = df['timestamp'].tolist()
     dates=[dt.datetime.fromtimestamp(ts) for ts in timestamps]
     datenums = md.date2num(dates)
-    d1 = df['Diode 1'].tolist()
-    d2 = df['Didoe 2'].tolist()
+    print(df.columns)
+    d1 = df['t0'].tolist()
+    d2 = df['t2'].tolist()
 
     fig, ax = plt.subplots(1)
     xfmt = md.DateFormatter('%Y-%m-%d %H:%M:%S')
@@ -82,7 +83,7 @@ def plot_file_all(filename):
     ax.plot(datenums, d2, label='Diode Channel 2') 
     ax.xaxis.set_major_formatter(xfmt)
     ax.tick_params(labelrotation=15)
-    ax.set_ylim([-200, 100])
+    ax.set_ylim([-275, 100])
 
     ax.legend()
     plt.show()
@@ -206,19 +207,20 @@ def main():
     
     refresh = 500
     debug = False
-    channels = [0, 2]
+    channels = [2, 3]
     headers = ['t'+str(c) for c in channels]
     headers2 = ['v'+str(c) for c in channels]
     headers.insert(0, 'timestamp')
     headers.extend(headers2)
     commands = ['CRDG?', 'SRDG?']
-    readtime = 1000
+    #in seconds
+    readtime = 100000
     data_range=[0,10]
     max_points = 100
     read_temperature_data(filename, refresh, channels, commands, headers,readtime, rand=False)
 
 if __name__== '__main__':
-    #filename = '20220621_diode470cal.txt'
+    filename = 'electric_run1_test.txt'
     #refresh = 1
-    #plot_file_all(filename)
-    main()
+    plot_file_all(filename)
+    #main()
